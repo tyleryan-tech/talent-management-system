@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Vercel：与 api/[...slug].js + 环境变量 TM_API_ORIGIN 配合，请求同源 /api/* -->
+  <!-- 若浏览器提示证书与域名不符，请用 Vercel 控制台「生产域名」或 Visit 链接打开，勿手改 URL；见 README §6 -->
+  <meta name="tm-api-base" content="__SAME_ORIGIN__" />
+  <!-- 实时推送：与 TM_API_ORIGIN 同一主机（填 https:// 即可，会转为 wss://） -->
+  <!-- <meta name="tm-ws-base" content="https://你的Node-API域名" /> -->
+  <title>Talent Management</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="./css/app.css" />
+  <!--
+    使用 Vue / Router / Pinia 的浏览器全局构建，避免 ES Module + CDN 在 file:// 下白屏。
+    需联网加载下方 CDN；离线时请改用本地静态服务器并自行托管脚本。
+  -->
+  <script src="https://unpkg.com/vue@3.4.27/dist/vue.global.prod.js"></script>
+  <script>window.VueDemi = Vue;</script>
+  <script src="https://unpkg.com/vue-router@4.4.0/dist/vue-router.global.prod.js"></script>
+  <script src="https://unpkg.com/pinia@2.2.1/dist/pinia.iife.js"></script>
+  <!-- SheetJS：花名册 Excel 导入导出 -->
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./js/storage.js"></script>
+  <script src="./js/constants/jobTrades.js"></script>
+  <script src="./js/constants/jobLevels.js"></script>
+  <script src="./js/seed.js"></script>
+  <script src="./js/utils/tenureFormat.js"></script>
+  <script src="./js/utils/rosterFieldConfig.js"></script>
+  <script src="./js/utils/echartsLoader.js"></script>
+  <script src="./js/utils/orgScope.js"></script>
+  <script src="./js/utils/orgApprovalChain.js"></script>
+  <script src="./js/utils/performanceWorkflow.js"></script>
+  <script src="./js/stores/dataStore.js"></script>
+  <script src="./js/utils/workspaceSnapshotDiff.js"></script>
+  <script src="./js/utils/serverSync.js"></script>
+  <script src="./js/stores/authStore.js"></script>
+  <script src="./js/stores/hrScopeStore.js"></script>
+  <script src="./js/stores/productLineStore.js"></script>
+  <script src="./js/views/Login.js"></script>
+  <script src="./js/views/Layout.js"></script>
+  <script src="./js/views/Profile.js"></script>
+  <script src="./js/views/hrbp/Analytics.js"></script>
+  <script src="./js/views/hrbp/Dashboard.js"></script>
+  <script src="./js/views/hrbp/Roster.js"></script>
+  <script src="./js/views/hrbp/Organization.js"></script>
+  <script src="./js/views/hrbp/Recruitment.js"></script>
+  <script src="./js/views/hrbp/Attendance.js"></script>
+  <script src="./js/views/hrbp/Performance.js"></script>
+  <script src="./js/views/hrbp/Talent.js"></script>
+  <script src="./js/views/manager/Dashboard.js"></script>
+  <script src="./js/views/manager/Team.js"></script>
+  <script src="./js/views/manager/Performance.js"></script>
+  <script src="./js/views/manager/Leaves.js"></script>
+  <script src="./js/views/manager/Training.js"></script>
+  <script src="./js/views/manager/Analytics.js"></script>
+  <script src="./js/views/manager/OrgApprovals.js"></script>
+  <script src="./js/router.js"></script>
+  <script src="./js/main.js"></script>
+</body>
+</html>
