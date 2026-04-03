@@ -78,7 +78,8 @@
       }
       auth.persistSession();
       const ss = window.TM.serverSync;
-      if (ss && ss.isEnabled && ss.isEnabled()) {
+      const hasServerToken = ss && ss.getToken && ss.getToken();
+      if (hasServerToken) {
         try {
           await ss.hydrateProductLinesFromServer(productLine);
           hrScope.hydrate();
@@ -87,21 +88,10 @@
           auth.enrichCurrentUserFromEmployee();
           ss.connectWs(productLine.currentLineId);
         } catch (e) {
-          const code = e.body?.code || '';
-          const status = e.status || 0;
-          const isServerDown = status === 0 || status === 502 || status === 503 || status === 504
-            || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE';
-          if (isServerDown) {
-            console.warn('[login] 服务端不可用，以本地数据继续', e.message || e);
-            window.dispatchEvent(new CustomEvent('tm-toast', {
-              detail: { message: '服务端暂不可用，已使用本地数据登录。', type: 'warning' },
-            }));
-          } else {
-            error.value = e.body?.error || e.message || '无法从服务器加载数据';
-            auth.logout();
-            auth.persistSession();
-            return;
-          }
+          console.warn('[login] 服务端数据加载失败，以本地数据继续', e.message || e);
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: { message: '服务端数据加载失败，已使用本地数据登录。', type: 'warning' },
+          }));
         }
       }
       const redir = route.query.redirect;
