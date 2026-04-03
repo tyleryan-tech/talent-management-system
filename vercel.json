@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "functions": {
+    "api/[...slug].js": {
+      "maxDuration": 10,
+      "includeFiles": "server/src/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/",
