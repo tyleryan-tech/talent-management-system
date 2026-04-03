@@ -27,10 +27,22 @@
             this.enrichCurrentUserFromEmployee();
             return { ok: true };
           } catch (e) {
+            const code = e.body?.code || '';
+            const status = e.status || 0;
+            const isServerDown = status === 0 || status === 502 || status === 503 || status === 504
+              || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE';
+            const is404Html = status === 404 && /NOT_FOUND/i.test(String(e.body?.raw || ''));
+            if (isServerDown || is404Html) {
+              console.warn('[auth] 服务端不可用，降级为本地账号登录', e.message || e);
+              return this._localLogin(identifier, password);
+            }
             const msg = e.body?.error || e.message || '登录失败';
             return { ok: false, message: msg };
           }
         }
+        return this._localLogin(identifier, password);
+      },
+      _localLogin(identifier, password) {
         const data = useDataStore();
         const id = String(identifier || '').trim();
         const idLower = id.toLowerCase();
