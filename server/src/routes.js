@@ -39,17 +39,7 @@ function createRouter(db, broadcastLine) {
     const id = identifier != null ? identifier : (email != null ? email : username);
     const result = authenticateLogin(db, id, password);
     if (!result.ok) {
-      res.status(401).json({
-        error: result.message,
-        code: 'LOGIN_FAILED',
-        _debug: {
-          bodyType: typeof req.body,
-          bodyKeys: req.body ? Object.keys(req.body) : null,
-          _bodyFlag: !!req._body,
-          idReceived: id || null,
-          hasPassword: !!password,
-        },
-      });
+      res.status(401).json({ error: result.message, code: 'LOGIN_FAILED' });
       return;
     }
     res.json({ token: result.token, user: result.user });

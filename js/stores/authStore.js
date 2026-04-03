@@ -33,18 +33,30 @@
               || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE';
             const is404Html = status === 404 && /NOT_FOUND/i.test(String(e.body?.raw || ''));
             if (isServerDown || is404Html) {
-              console.warn('[auth] 服务端不可用，降级为本地账号登录', e.message || e);
-              return this._localLogin(identifier, password);
+              console.warn('[auth] 服务端不可用，降级为本地账号登录', status, e.message || e);
+              const local = this._localLogin(identifier, password);
+              if (!local.ok) local.message = '服务端暂不可用，本地登录也失败。请稍后重试或刷新页面。';
+              return local;
             }
-            console.error('[auth] server login failed', e.status, e.body);
-            const debug = e.body?._debug ? ` [body: ${JSON.stringify(e.body._debug)}]` : '';
+            console.error('[auth] server login failed', status, e.body);
+            const debug = e.body?._debug ? ` [debug: ${JSON.stringify(e.body._debug)}]` : '';
             const msg = (e.body?.error || e.message || '登录失败') + debug;
             return { ok: false, message: msg };
           }
         }
         return this._localLogin(identifier, password);
       },
+      _ensureFallbackUsers() {
+        const data = useDataStore();
+        if (data.users && data.users.length > 0) return;
+        data.users = [
+          { id: 1, username: 'hrbp', email: 'hrbp@company.com', password: '123', role: 'hrbp', realName: 'HRBP Admin', employeeId: null },
+          { id: 2, username: 'manager', email: 'manager@company.com', password: '123', role: 'manager', realName: 'Reporting Manager', employeeId: null },
+          { id: 3, username: 'superadmin', email: 'superadmin@company.com', password: '123', role: 'hrbp', superAdmin: true, realName: 'Super Admin', employeeId: null },
+        ];
+      },
       _localLogin(identifier, password) {
+        this._ensureFallbackUsers();
         const data = useDataStore();
         const id = String(identifier || '').trim();
         const idLower = id.toLowerCase();
@@ -54,7 +66,7 @@
           const em = String(x.email || '').trim().toLowerCase();
           return un === id || (em && em === idLower);
         });
-        if (!u) return { ok: false, message: 'Invalid email/username or password' };
+        if (!u) return { ok: false, message: '邮箱/用户名或密码错误' };
         this.currentUser = { ...u };
         this.enrichCurrentUserFromEmployee();
         return { ok: true };

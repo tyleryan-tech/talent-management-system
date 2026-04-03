@@ -46,7 +46,7 @@
 
   const lineId = productLineStore.currentLineId;
   if (!dataLoadedFromServer) {
-    if (!useServer && lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
+    if (lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
       TM.seedAllData(lineId);
       window.__TM_FIRST_SEED__ = true;
     }

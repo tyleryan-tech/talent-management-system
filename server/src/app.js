@@ -8,8 +8,6 @@ const express = require('express');
 const cors = require('cors');
 const { openDatabase, initSchema, bootSeed } = require('./db');
 const { createRouter } = require('./routes');
-const { authenticateLogin } = require('./auth');
-
 let _app = null;
 let _db = null;
 
@@ -32,23 +30,7 @@ function createApp() {
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => {
-    try {
-      const userCount = _db.prepare('SELECT COUNT(*) AS c FROM login_users').get().c;
-      const result = authenticateLogin(_db, 'hrbp@company.com', '123');
-      res.json({
-        ok: true,
-        service: 'talent-hub-server',
-        diag: {
-          userCount,
-          loginOk: result.ok,
-          loginMessage: result.message || null,
-          hasToken: !!result.token,
-          dbPath: process.env.DB_PATH,
-        },
-      });
-    } catch (e) {
-      res.json({ ok: true, service: 'talent-hub-server', diagError: e.message });
-    }
+    res.json({ ok: true, service: 'talent-hub-server' });
   });
 
   app.use('/api', createRouter(_db, () => {}));
