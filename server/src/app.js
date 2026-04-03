@@ -8,8 +8,10 @@ const express = require('express');
 const cors = require('cors');
 const { openDatabase, initSchema, bootSeed } = require('./db');
 const { createRouter } = require('./routes');
+const { authenticateLogin } = require('./auth');
 
 let _app = null;
+let _db = null;
 
 function createApp() {
   if (_app) return _app;
@@ -21,9 +23,9 @@ function createApp() {
     process.env.JWT_SECRET = 'vercel-demo-jwt-secret';
   }
 
-  const db = openDatabase();
-  initSchema(db);
-  bootSeed(db);
+  _db = openDatabase();
+  initSchema(_db);
+  bootSeed(_db);
 
   const app = express();
   app.use(cors({ origin: true, credentials: true }));
@@ -33,7 +35,32 @@ function createApp() {
     res.json({ ok: true, service: 'talent-hub-server' });
   });
 
-  app.use('/api', createRouter(db, () => {}));
+  app.get('/api/debug/test-login', (_req, res) => {
+    try {
+      const userCount = _db.prepare('SELECT COUNT(*) AS c FROM login_users').get().c;
+      const result = authenticateLogin(_db, 'hrbp@company.com', '123');
+      res.json({
+        userCount,
+        loginOk: result.ok,
+        loginMessage: result.message || null,
+        hasToken: !!result.token,
+        userName: result.user?.username || null,
+      });
+    } catch (e) {
+      res.json({ error: e.message, stack: e.stack });
+    }
+  });
+
+  app.post('/api/debug/echo', (req, res) => {
+    res.json({
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : null,
+      _bodyFlag: !!req._body,
+      body: req.body,
+    });
+  });
+
+  app.use('/api', createRouter(_db, () => {}));
 
   _app = app;
   return app;
