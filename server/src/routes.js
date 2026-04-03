@@ -33,12 +33,23 @@ function createRouter(db, broadcastLine) {
     res.json({ ok: true, service: 'talent-hub-server' });
   });
 
-  r.post('/auth/login', express.json(), (req, res) => {
-    const { identifier, password, email, username } = req.body || {};
+  r.post('/auth/login', (req, res) => {
+    const body = req.body || {};
+    const { identifier, password, email, username } = body;
     const id = identifier != null ? identifier : (email != null ? email : username);
     const result = authenticateLogin(db, id, password);
     if (!result.ok) {
-      res.status(401).json({ error: result.message, code: 'LOGIN_FAILED' });
+      res.status(401).json({
+        error: result.message,
+        code: 'LOGIN_FAILED',
+        _debug: {
+          bodyType: typeof req.body,
+          bodyKeys: req.body ? Object.keys(req.body) : null,
+          _bodyFlag: !!req._body,
+          idReceived: id || null,
+          hasPassword: !!password,
+        },
+      });
       return;
     }
     res.json({ token: result.token, user: result.user });

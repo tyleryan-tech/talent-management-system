@@ -36,7 +36,9 @@
               console.warn('[auth] 服务端不可用，降级为本地账号登录', e.message || e);
               return this._localLogin(identifier, password);
             }
-            const msg = e.body?.error || e.message || '登录失败';
+            console.error('[auth] server login failed', e.status, e.body);
+            const debug = e.body?._debug ? ` [body: ${JSON.stringify(e.body._debug)}]` : '';
+            const msg = (e.body?.error || e.message || '登录失败') + debug;
             return { ok: false, message: msg };
           }
         }
