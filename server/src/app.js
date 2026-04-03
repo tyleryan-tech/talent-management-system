@@ -32,32 +32,23 @@ function createApp() {
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, service: 'talent-hub-server' });
-  });
-
-  app.get('/api/debug/test-login', (_req, res) => {
     try {
       const userCount = _db.prepare('SELECT COUNT(*) AS c FROM login_users').get().c;
       const result = authenticateLogin(_db, 'hrbp@company.com', '123');
       res.json({
-        userCount,
-        loginOk: result.ok,
-        loginMessage: result.message || null,
-        hasToken: !!result.token,
-        userName: result.user?.username || null,
+        ok: true,
+        service: 'talent-hub-server',
+        diag: {
+          userCount,
+          loginOk: result.ok,
+          loginMessage: result.message || null,
+          hasToken: !!result.token,
+          dbPath: process.env.DB_PATH,
+        },
       });
     } catch (e) {
-      res.json({ error: e.message, stack: e.stack });
+      res.json({ ok: true, service: 'talent-hub-server', diagError: e.message });
     }
-  });
-
-  app.post('/api/debug/echo', (req, res) => {
-    res.json({
-      bodyType: typeof req.body,
-      bodyKeys: req.body ? Object.keys(req.body) : null,
-      _bodyFlag: !!req._body,
-      body: req.body,
-    });
   });
 
   app.use('/api', createRouter(_db, () => {}));
