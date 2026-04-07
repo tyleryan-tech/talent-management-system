@@ -1,0 +1,98 @@
+---
+description: 部署架构、已知问题、修复历史——供后续对话快速恢复上下文
+alwaysApply: true
+---
+
+# 人才管理系统：部署与修复上下文
+
+## 1. 项目架构
+
+### 前端（Vercel 静态托管）
+- **入口**：`index.html`（Vue 3 + Vue Router 4 Hash 模式 + Pinia 2，全局脚本加载，无构建步骤）
+- **域名**：`https://talent-management-system-nine.vercel.app/`
+- **GitHub**：`https://github.com/tyleryan-tech/talent-management-system.git`（`main` 分支）
+- **Vercel 自动部署**：push 到 `main` 后 Vercel 自动构建并部署
+
+### 后端 API（Vercel Serverless）
+- **入口**：`api/[...slug].js` → 引用 `server/src/app.js`（Express 应用）
+- **数据库**：SQLite（`better-sqlite3`），存于 Vercel 函数的 `/tmp/talent-hub.db`
+- **特性**：冷启动时自动 seed 3 个演示账号 + 1 条默认产品线 + ~120 名演示员工
+- **限制**：`/tmp` 是临时的，函数长时间不调用后冷启动会重新 seed（数据不永久保留）
+- **WebSocket**：Vercel 不支持长连接，已禁用；前端有轮询回退
+
+### 关键配置文件
+- `vercel.json`：SPA rewrite（`/` 和非 `/api/` 路径 → `index.html`）+ 函数配置（`includeFiles: server/src/**`）
+- `package.json`（根目录）：Vercel 构建时安装的依赖（`better-sqlite3`, `express`, `jsonwebtoken`, `bcryptjs`, `cors`）
+- `server/package.json`：独立 Node 服务的依赖（含 `dotenv`, `ws`，用于本地开发或独立部署）
+- `index.html` 中 `<meta name="tm-api-base" content="__SAME_ORIGIN__">`：前端 API 请求走同源 `/api/*`
+
+## 2. 登录流程（当前实现）
+
+```
+用户点击 Sign in
+  → authStore.login(email, password)
+    → 尝试 POST /api/auth/login（服务端 bcrypt 验证）
+    → 成功 → 设 token → Login.js 检查 hasServerToken → 拉取服务端数据 → 进入系统
+    → 失败（超时/网络错误/503）→ 降级 _localLogin（本地 dataStore.users 匹配）
+      → _ensureFallbackUsers() 确保本地至少有 3 个演示账号
+      → 成功 → Login.js 检查 hasServerToken=空 → 跳过服务端拉取 → 直接进入系统
+```
+
+### 演示账号
+| 邮箱 | 密码 | 角色 |
+|------|------|------|
+| hrbp@company.com | 123 | HRBP |
+| manager@company.com | 123 | 汇报经理 |
+| superadmin@company.com | 123 | 超级管理员 |
+
+## 3. 已解决的问题（按时间顺序）
+
+### 3.1 Vercel 部署 404（NOT_FOUND + sfo1::...）
+- **原因**：Git 仓库初始化在 `C:\Users\26104`（用户主目录）而非项目目录，GitHub 上所有文件在 `Desktop/人才管理/` 下，仓库根没有 `index.html`
+- **修复**：在 `c:\Users\26104\Desktop\人才管理\` 内 `git init` 创建独立仓库 → `git push --force` 替换 GitHub 结构 → 文件在仓库根
+
+### 3.2 办公网 ERR_CERT_COMMON_NAME_INVALID
+- **原因**：公司网络 HTTPS 审计/网关代签证书，与 `*.vercel.app` 不匹配
+- **处理**：非代码问题，需网管加白名单或换网络
+
+### 3.3 办公网 Error Code -118（ERR_CONNECTION_TIMED_OUT）
+- **原因**：公司防火墙屏蔽 `*.vercel.app`
+- **处理**：同上
+
+### 3.4 手机登录报「接口返回 404」
+- **原因**：`index.html` 启用了 `__SAME_ORIGIN__` 但未配置后端 API（当时 `api/[...slug].js` 是代理模式，无 `TM_API_ORIGIN`）
+- **修复**：将 `api/[...slug].js` 从代理改为直接运行 Express 应用
+
+### 3.5 登录提示「Invalid email/username or password」
+- **原因链**：
+  1. Vercel 已预解析 `req.body`，Express `body-parser` 再读流时为空 → 服务端收到空参数 → 401
+  2. 401 触发降级到 `_localLogin`，但首次访问时 `useServer=true` 导致未 seed 本地数据 → `data.users` 为空 → 本地也失败
+- **修复**：
+  1. `api/[...slug].js` 设 `req._body = true` 保留 Vercel 预解析的 body
+  2. `main.js` 去掉 `!useServer` 条件：无论是否启用服务端同步，首次访问都 seed 演示数据
+  3. `authStore._ensureFallbackUsers()` 确保本地至少有演示账号
+
+### 3.6 登录提示「未登录」
+- **原因**：本地降级登录成功但无服务端 token，Login.js 仍调用需认证的 `/api/product-lines` → 401 → 登出
+- **修复**：Login.js 改为检查 `hasServerToken`，无 token 时跳过服务端数据拉取
+
+## 4. 当前待验证 / 潜在问题
+
+- **Vercel 冷启动耗时**：`better-sqlite3` 加载 + `bcrypt.hashSync` seed 可能导致首次请求超时（10s 限制），这可能是手机端服务端登录总降级到本地的原因
+- **办公网无法访问**：用户办公网屏蔽 `*.vercel.app`，需换网络或绑定自有域名
+- **数据非持久**：`/tmp` 在 Vercel 冷启动后清空，演示数据会重新 seed（对生产不可接受，需外部数据库）
+
+## 5. 如需持久后端
+
+当前方案适合演示。若需持久数据 + WebSocket：
+- 将 `server/` 部署到 Render / Railway / Fly.io / VPS
+- 在 Vercel 设 `TM_API_ORIGIN` 环境变量（或改 `api/[...slug].js` 回代理模式）
+- `index.html` 加 `<meta name="tm-ws-base" content="wss://后端域名" />`
+- 仓库里有 `render.yaml` 可一键部署到 Render
+
+## 6. Git 配置
+
+- **本地仓库根**：`c:\Users\26104\Desktop\人才管理\.git`（已修正，不再是用户主目录）
+- **远程**：`origin → https://github.com/tyleryan-tech/talent-management-system.git`
+- **分支**：`main`
+- **注意**：`C:\Users\26104\.git` 仍存在（旧的错误仓库），不要在那个级别操作 git
