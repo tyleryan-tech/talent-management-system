@@ -512,6 +512,38 @@ select.multi {
   gap: 1rem;
 }
 
+/* Employee status 数字列表 */
+.status-num-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.status-num-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-num-label {
+  color: var(--muted);
+}
+.status-num-val {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  min-width: 1.8rem;
+}
+
 .stat-card {
   padding: 1.25rem;
 }
@@ -903,6 +935,44 @@ select.multi {
 .analytics-level-filter .input {
   min-width: 7.5rem;
 }
+/* Work experience 职级快捷筛选按钮 */
+.rank-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.rank-btn {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1.5;
+}
+.rank-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.rank-btn-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.rank-btn-clear {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: #fff0f0;
+}
+.rank-btn-clear:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
 .devtest-summary {
   display: flex;
   flex-wrap: wrap;

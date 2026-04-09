@@ -23,6 +23,13 @@
         </div>
         <div class="card pad">
           <h3 class="section-title">Employee status</h3>
+          <div class="status-num-row">
+            <div class="status-num-item" v-for="s in statusNums" :key="s.label">
+              <span class="status-dot" :style="{ background: s.color }"></span>
+              <span class="status-num-label">{{ s.label }}</span>
+              <span class="status-num-val">{{ s.value }}</span>
+            </div>
+          </div>
           <div ref="chartStatus" class="chart-box"></div>
         </div>
       </div>
@@ -39,10 +46,22 @@
 
     const stats = computed(() => {
       const emps = data.employees;
-      const active = emps.filter((e) => e.status === 'active').length;
       return [
-        { k: 'emp', label: 'Active employees', value: emps.filter((e) => e.status !== 'leave').length },
-        { k: 'active', label: 'Regular active', value: active },
+        { k: 'total', label: 'Total employees', value: emps.length },
+        { k: 'emp', label: 'Active (incl. probation)', value: emps.filter((e) => e.status !== 'leave').length },
+        { k: 'leave', label: 'Terminated', value: emps.filter((e) => e.status === 'leave').length },
+      ];
+    });
+
+    const STATUS_COLORS = { active: '#6366f1', probation: '#f59e0b', leave: '#ef4444' };
+    const statusNums = computed(() => {
+      const emps = data.employees;
+      const cnt = { active: 0, probation: 0, leave: 0 };
+      emps.forEach((e) => { cnt[e.status] = (cnt[e.status] || 0) + 1; });
+      return [
+        { label: 'Active', value: cnt.active, color: STATUS_COLORS.active },
+        { label: 'Probation', value: cnt.probation, color: STATUS_COLORS.probation },
+        { label: 'Terminated', value: cnt.leave, color: STATUS_COLORS.leave },
       ];
     });
 
@@ -72,14 +91,28 @@
       if (chartStatus.value) {
         const c2 = echarts.init(chartStatus.value);
         c2.setOption({
-          tooltip: { trigger: 'item' },
+          tooltip: {
+            trigger: 'item',
+            formatter: (p) => `${p.name}<br/><b>${p.value}</b> 人 (${p.percent}%)`,
+          },
+          legend: { orient: 'horizontal', bottom: 4, textStyle: { color: '#64748b', fontSize: 12 } },
           series: [{
             type: 'pie',
-            radius: ['42%', '68%'],
+            radius: ['42%', '65%'],
+            center: ['50%', '45%'],
+            label: {
+              show: true,
+              formatter: (p) => `{val|${p.value}}\n{pct|${p.percent}%}`,
+              rich: {
+                val: { fontSize: 15, fontWeight: 'bold', color: '#1e293b', lineHeight: 22 },
+                pct: { fontSize: 11, color: '#64748b', lineHeight: 16 },
+              },
+            },
+            labelLine: { length: 10, length2: 8 },
             data: [
-              { name: 'Active', value: st.active || 0 },
-              { name: 'Probation', value: st.probation || 0 },
-              { name: 'Terminated', value: st.leave || 0 },
+              { name: 'Active', value: st.active || 0, itemStyle: { color: '#6366f1' } },
+              { name: 'Probation', value: st.probation || 0, itemStyle: { color: '#f59e0b' } },
+              { name: 'Terminated', value: st.leave || 0, itemStyle: { color: '#ef4444' } },
             ],
           }],
         });
@@ -87,7 +120,7 @@
       }
     });
 
-    return { stats, chartDept, chartStatus };
+    return { stats, statusNums, chartDept, chartStatus };
   },
 };
 })();

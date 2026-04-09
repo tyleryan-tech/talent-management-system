@@ -85,7 +85,22 @@
       <div class="grid-2">
         <div class="card pad">
           <h3 class="section-title">Work experience (since career start)</h3>
-          <p class="muted small">Based on <strong>career start date</strong> (not company tenure). If missing, approximated from birthday + 22 years. Click a bar for the list. Use <strong>Rank</strong> in the organization bar above to match the hire year chart.</p>
+          <p class="muted small">Based on <strong>career start date</strong> (not company tenure). If missing, approximated from birthday + 22 years. Click a bar for the list.</p>
+          <div class="rank-btn-row">
+            <button
+              v-for="lv in workExpLevelOptions"
+              :key="'we-' + lv"
+              type="button"
+              :class="['rank-btn', analyticsRankFilter === lv && 'rank-btn-active']"
+              @click="analyticsRankFilter = (analyticsRankFilter === lv ? '' : lv)"
+            >{{ lv }}</button>
+            <button
+              v-if="analyticsRankFilter"
+              type="button"
+              class="rank-btn rank-btn-clear"
+              @click="analyticsRankFilter = ''"
+            ><i class="fa-solid fa-xmark"></i> All ranks</button>
+          </div>
           <div ref="cTenure" class="chart-box"></div>
         </div>
         <div class="card pad">
@@ -220,6 +235,9 @@
         });
         return Array.from(set).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
       });
+
+      /** Work experience 图表下方快捷职级按钮（与 Rank 下拉联动，数据同源） */
+      const workExpLevelOptions = levelOptions;
 
       function empsForTenure() {
         return scopedEmps();
@@ -654,7 +672,7 @@
       return {
         cTenure, cHireYear, cTrend, cDevTest, cTradeHc, cLevelHc, cAvgTenureDim,
         scopeRootDeptUi, deptScopeOptions, scopeHint,
-        analyticsRankFilter, avgTenureDimension, levelOptions, devTest,
+        analyticsRankFilter, avgTenureDimension, levelOptions, workExpLevelOptions, devTest,
         tenureModalOpen, tenureModalBucket, tenureModalRows,
         deptLabel, posLabel, levelLabel, formatWorkExpLabel, careerStartDisplay,
       };
