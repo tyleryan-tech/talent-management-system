@@ -227,6 +227,7 @@ function perfStatusEn(s) {
                 </div>
               </div>
               <div class="col-picker-footer">
+                <button type="button" class="btn btn-ghost btn-sm" @click="showAllColumns">Show all</button>
                 <button type="button" class="btn btn-ghost btn-sm" @click="resetColumnSettingsDefault">Reset defaults</button>
               </div>
             </div>
@@ -549,7 +550,14 @@ function perfStatusEn(s) {
       _warnFieldDep(key);
       const s = _getColSettings();
       const col = s.columns.find((c) => c.key === key);
-      if (col) { col.visible = false; data.setRosterColumnSettings(s); }
+      if (col) {
+        col.visible = false;
+        data.setRosterColumnSettings(s);
+        const label = col.label || col.key;
+        window.dispatchEvent(new CustomEvent('tm-toast', {
+          detail: { message: `已隐藏字段「${label}」，可点击工具栏 Columns 按钮恢复显示`, type: 'info' },
+        }));
+      }
     }
 
     function toggleColumnVisibility(key, visible) {
@@ -557,6 +565,13 @@ function perfStatusEn(s) {
       const s = _getColSettings();
       const col = s.columns.find((c) => c.key === key);
       if (col) { col.visible = !!visible; data.setRosterColumnSettings(s); }
+    }
+
+    function showAllColumns() {
+      const s = _getColSettings();
+      s.columns.forEach((c) => { c.visible = true; });
+      data.setRosterColumnSettings(s);
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已显示全部字段', type: 'success' } }));
     }
 
     function quickMoveColumn(key, delta) {
@@ -1330,7 +1345,7 @@ function perfStatusEn(s) {
       exportExcel, importExcel, appendImportExcel, downloadExcelTemplate,
       visibleRosterColumns, allRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle,
       colFilterType, hasActiveFilters,
-      showColPicker, quickHideColumn, quickMoveColumn, toggleColumnVisibility, resetColumnSettingsDefault,
+      showColPicker, quickHideColumn, quickMoveColumn, toggleColumnVisibility, showAllColumns, resetColumnSettingsDefault,
       fieldEditorOpen, fieldEditorRows, layoutPreview,
       openRosterFieldEditor, saveRosterFieldEditor, moveFieldRow, resetRosterFieldsDefault, fieldDefLabel,
       onUploadLayoutHeaders, applyLayoutFromPreview,
