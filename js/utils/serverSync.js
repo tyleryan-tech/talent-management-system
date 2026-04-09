@@ -262,6 +262,12 @@
       wsLineSubscribed = null;
     },
 
+    /** 切换产品线前调用，取消尚未发出的推送，避免把新线数据误推到旧版本号 */
+    cancelPendingPush() {
+      clearTimeout(pushTimer);
+      pushTimer = null;
+    },
+
     scheduleWorkspacePush() {
       if (!serverSync.isEnabled()) return;
       clearTimeout(pushTimer);

@@ -104,7 +104,8 @@
         const ss = TM.serverSync;
         const nm = String(name || '').trim() || 'New product line';
         const today = new Date().toISOString().slice(0, 10);
-        data.persistAll();
+        if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
+        data.persistAll({ skipRemote: true });
         let id;
         if (ss && ss.isEnabled && ss.isEnabled()) {
           try {
@@ -120,10 +121,11 @@
             if (typeof TM.seedAllData === 'function') {
               TM.seedAllData(id);
               data.hydrate();
+              if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
             } else {
               data.importSnapshot(emptyLineSnapshot());
             }
-            data.persistAll();
+            data.persistAll({ skipRemote: true });
           } catch (e) {
             window.dispatchEvent(new CustomEvent('tm-toast', {
               detail: { message: e.body?.error || e.message || '创建产品线失败', type: 'error' },
@@ -160,7 +162,9 @@
         if (id === this.currentLineId) return true;
         const data = TM.useDataStore();
         const ss = TM.serverSync;
-        data.persistAll();
+        // 取消所有挂起的推送：切换前先落盘但不推送；推送时序混乱会导致"同步失败"弹窗
+        if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
+        data.persistAll({ skipRemote: true });
         this.currentLineId = id;
         this.persistRegistry();
         const hr = TM.useHrScopeStore();
@@ -176,15 +180,14 @@
               }));
               return false;
             }
-            // 非鉴权错误（网络超时、服务器冷启动等）：静默回退到本地缓存数据
+            // 非鉴权错误（网络超时、冷启动等）：回退本地缓存，取消 hydrate 内部触发的推送
             data.hydrate();
-            window.dispatchEvent(new CustomEvent('tm-toast', {
-              detail: { message: '服务器暂时无法访问，已加载本地缓存数据', type: 'warning' },
-            }));
+            if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
           }
           ss.connectWs(id);
         } else {
           data.hydrate();
+          if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
         }
         const root = hr.scopeRootDepartmentId;
         if (root != null && !data.departments.some((d) => d.id === root)) {
@@ -211,7 +214,8 @@
         if (Number.isNaN(id) || !this.lines.some((l) => l.id === id)) return false;
         const data = TM.useDataStore();
         const ss = TM.serverSync;
-        data.persistAll();
+        if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
+        data.persistAll({ skipRemote: true });
         const removedName = this.lines.find((l) => l.id === id)?.name || String(id);
         if (ss && ss.isEnabled && ss.isEnabled()) {
           try {
@@ -236,10 +240,12 @@
             await ss.pullWorkspaceQuiet(this.currentLineId);
           } catch {
             data.hydrate();
+            if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
           }
           ss.connectWs(this.currentLineId);
         } else {
           data.hydrate();
+          if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
         }
         const root = hr.scopeRootDepartmentId;
         if (root != null && !data.departments.some((d) => d.id === root)) {
