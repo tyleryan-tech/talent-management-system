@@ -579,14 +579,158 @@ select.multi {
   gap: 0.5rem;
 }
 
-/* 列头嵌入式筛选 */
+/* 列头顶部行：标签 + 悬停操作按钮 */
+.col-th-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 5px;
+}
 .col-th-label {
   font-weight: 600;
   color: var(--muted);
   font-size: 0.8125rem;
   white-space: nowrap;
-  margin-bottom: 5px;
+  flex: 1;
+  min-width: 0;
 }
+.col-th-actions {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+th:hover .col-th-actions {
+  display: flex;
+}
+.col-th-btn {
+  padding: 1px 4px;
+  font-size: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1.4;
+  transition: background 0.1s, color 0.1s;
+}
+.col-th-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: var(--text);
+}
+.col-th-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.col-th-btn-hide:hover {
+  background: #fee2e2 !important;
+  color: #ef4444 !important;
+  border-color: #ef4444;
+}
+
+/* Columns 浮窗面板 */
+.col-picker-wrap {
+  position: relative;
+  z-index: 201;
+}
+.col-picker-count {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: 2px;
+}
+.col-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: transparent;
+}
+.col-picker-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 202;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.14);
+  width: 260px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8125rem;
+}
+.col-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  flex-shrink: 0;
+}
+.col-picker-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.col-picker-close:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+.col-picker-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.col-picker-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  gap: 6px;
+}
+.col-picker-row:hover {
+  background: #f8fafc;
+}
+.col-picker-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  cursor: pointer;
+  min-width: 0;
+}
+.col-picker-check input[type="checkbox"] {
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.col-picker-check span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-picker-hidden-label {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.col-picker-move-btns {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.col-picker-footer {
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* 列头嵌入式筛选 */
 .col-th-has-filter {
   padding-bottom: 6px;
   vertical-align: top;

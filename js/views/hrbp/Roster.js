@@ -205,7 +205,33 @@ function perfStatusEn(s) {
           <button v-if="auth.isHrbp" type="button" class="btn btn-danger" :disabled="!selectedIds.length" @click="batchDeleteEmployees">Delete selected</button>
           <button type="button" class="btn btn-secondary" @click="exportExcel">Export Excel</button>
           <button type="button" class="btn btn-ghost btn-sm" @click="downloadExcelTemplate">Download import template</button>
-          <button v-if="auth.isHrbp" type="button" class="btn btn-ghost btn-sm" @click="openRosterFieldEditor">Roster column settings</button>
+          <div class="col-picker-wrap">
+            <button type="button" :class="['btn btn-ghost btn-sm', showColPicker ? 'btn-active' : '']" @click.stop="showColPicker = !showColPicker" title="Show/hide columns and adjust order">
+              <i class="fa-solid fa-table-columns"></i> Columns <span class="col-picker-count">({{ visibleRosterColumns.length }}/{{ allRosterColumns.length }})</span>
+            </button>
+            <div v-if="showColPicker" class="col-picker-panel" @click.stop>
+              <div class="col-picker-header">
+                <span>Column visibility &amp; order</span>
+                <button type="button" class="col-picker-close" @click="showColPicker = false">✕</button>
+              </div>
+              <div class="col-picker-list">
+                <div v-for="(col, idx) in allRosterColumns" :key="col.key" class="col-picker-row">
+                  <label class="col-picker-check">
+                    <input type="checkbox" :checked="col.visible" @change="toggleColumnVisibility(col.key, $event.target.checked)" />
+                    <span :class="{ 'col-picker-hidden-label': !col.visible }">{{ col.labelResolved }}</span>
+                  </label>
+                  <div class="col-picker-move-btns">
+                    <button type="button" class="col-th-btn" :disabled="idx === 0" @click="quickMoveColumn(col.key, -1)" title="Move up">↑</button>
+                    <button type="button" class="col-th-btn" :disabled="idx === allRosterColumns.length - 1" @click="quickMoveColumn(col.key, 1)" title="Move down">↓</button>
+                  </div>
+                </div>
+              </div>
+              <div class="col-picker-footer">
+                <button type="button" class="btn btn-ghost btn-sm" @click="resetColumnSettingsDefault">Reset defaults</button>
+              </div>
+            </div>
+          </div>
+          <div v-if="showColPicker" class="col-picker-overlay" @click="showColPicker = false"></div>
           <label v-if="auth.isHrbp" class="btn btn-ghost file-label" title="Use the first row of a spreadsheet to set visible columns, order, and header labels (fuzzy match)">
             Build columns from file
             <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden-file" @change="onUploadLayoutHeaders" />
@@ -228,7 +254,14 @@ function perfStatusEn(s) {
               <th v-if="auth.isHrbp" class="roster-sel"><input type="checkbox" title="Select all in current filter" :checked="allFilteredSelected" @change="toggleSelectAllFiltered($event.target.checked)" /></th>
               <th v-for="col in visibleRosterColumns" :key="col.key"
                 :class="{ 'roster-col-path': col.key === 'teamPath', 'col-th-has-filter': !!colFilterType(col.key) }">
-                <div class="col-th-label">{{ col.labelResolved }}</div>
+                <div class="col-th-top">
+                  <span class="col-th-label">{{ col.labelResolved }}</span>
+                  <span class="col-th-actions">
+                    <button type="button" class="col-th-btn" @click.stop="quickMoveColumn(col.key, -1)" title="Move left">◀</button>
+                    <button type="button" class="col-th-btn" @click.stop="quickMoveColumn(col.key, 1)" title="Move right">▶</button>
+                    <button type="button" class="col-th-btn col-th-btn-hide" @click.stop="quickHideColumn(col.key)" title="Hide this column">✕</button>
+                  </span>
+                </div>
                 <template v-if="colFilterType(col.key) === 'dept'">
                   <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
                     <option value="">All</option>
@@ -478,6 +511,45 @@ function perfStatusEn(s) {
     const fieldEditorOpen = ref(false);
     const fieldEditorRows = ref([]);
     const layoutPreview = ref(null);
+    const showColPicker = ref(false);
+
+    /** 所有列（含隐藏），用于 Columns 面板 */
+    const allRosterColumns = computed(() => {
+      const s = data.rosterColumnSettings || window.TM.defaultRosterColumnSettings();
+      return window.TM.resolveRosterColumns(s);
+    });
+
+    function _getColSettings() {
+      const s = data.rosterColumnSettings || window.TM.defaultRosterColumnSettings();
+      return { version: 1, columns: JSON.parse(JSON.stringify(s.columns)) };
+    }
+
+    function quickHideColumn(key) {
+      const s = _getColSettings();
+      const col = s.columns.find((c) => c.key === key);
+      if (col) { col.visible = false; data.setRosterColumnSettings(s); }
+    }
+
+    function toggleColumnVisibility(key, visible) {
+      const s = _getColSettings();
+      const col = s.columns.find((c) => c.key === key);
+      if (col) { col.visible = !!visible; data.setRosterColumnSettings(s); }
+    }
+
+    function quickMoveColumn(key, delta) {
+      const s = _getColSettings();
+      const idx = s.columns.findIndex((c) => c.key === key);
+      if (idx < 0) return;
+      const j = idx + delta;
+      if (j < 0 || j >= s.columns.length) return;
+      const tmp = s.columns[idx]; s.columns[idx] = s.columns[j]; s.columns[j] = tmp;
+      data.setRosterColumnSettings(s);
+    }
+
+    function resetColumnSettingsDefault() {
+      data.setRosterColumnSettings(window.TM.defaultRosterColumnSettings());
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Column layout reset to default', type: 'success' } }));
+    }
 
     const COLUMN_FILTER_TYPE = {
       team: 'dept', teamPath: 'dept',
@@ -1233,8 +1305,9 @@ function perfStatusEn(s) {
       modal, modalMode, form, positionsInDept,
       openCreate, openEdit, saveEmployee, doLeave, openDetail, detail, detailRows, detailReviews,
       exportExcel, importExcel, appendImportExcel, downloadExcelTemplate,
-      visibleRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle,
+      visibleRosterColumns, allRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle,
       colFilterType, hasActiveFilters,
+      showColPicker, quickHideColumn, quickMoveColumn, toggleColumnVisibility, resetColumnSettingsDefault,
       fieldEditorOpen, fieldEditorRows, layoutPreview,
       openRosterFieldEditor, saveRosterFieldEditor, moveFieldRow, resetRosterFieldsDefault, fieldDefLabel,
       onUploadLayoutHeaders, applyLayoutFromPreview,
