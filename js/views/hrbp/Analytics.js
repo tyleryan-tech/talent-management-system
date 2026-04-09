@@ -265,17 +265,18 @@
         </div>
       </div>
 
-      <!-- Custom charts added by user -->
-      <template v-if="chartPrefs.customCharts.length">
+      <!-- Custom charts added by user (only visible ones) -->
+      <template v-if="visibleCustomCharts.length">
         <div class="custom-charts-section">
           <h3 class="section-title" style="margin-top:1.5rem;margin-bottom:.5rem">
             <i class="fa-solid fa-wand-magic-sparkles"></i> My charts
           </h3>
           <div class="custom-charts-grid">
             <CustomChartCard
-              v-for="cc in chartPrefs.customCharts"
+              v-for="cc in visibleCustomCharts"
               :key="cc.id"
               :config="cc"
+              @hide="chartPrefs.toggleVisibility"
               @remove="chartPrefs.removeCustomChart"
             />
           </div>
@@ -340,6 +341,10 @@
       const showCustomizePanel = ref(false);
       const showAddChart = ref(false);
       const newChart = ref({ title: '', groupBy: 'rank', chartType: 'bar', scope: 'active' });
+
+      const visibleCustomCharts = computed(() =>
+        chartPrefs.customCharts.filter((c) => chartPrefs.isVisible(c.id))
+      );
 
       function saveCustomChart() {
         if (!newChart.value.title.trim()) return;
@@ -848,7 +853,7 @@
         analyticsRankFilter, avgTenureDimension, levelOptions, workExpLevelOptions, devTest,
         tenureModalOpen, tenureModalBucket, tenureModalRows,
         deptLabel, posLabel, levelLabel, formatWorkExpLabel, careerStartDisplay,
-        chartPrefs, showCustomizePanel, showAddChart, newChart, saveCustomChart,
+        chartPrefs, showCustomizePanel, showAddChart, newChart, saveCustomChart, visibleCustomCharts,
       };
     },
   };

@@ -24,13 +24,13 @@
       <div class="dash-chart-toolbar card pad">
         <div class="dash-chart-toolbar-row">
           <span class="dash-chart-toolbar-label"><i class="fa-solid fa-chart-column"></i> Charts</span>
-          <span v-if="hiddenDashCharts.length" class="dash-hidden-count">{{ hiddenDashCharts.length }} hidden</span>
+          <span v-if="allHiddenCharts.length" class="dash-hidden-count">{{ allHiddenCharts.length }} hidden</span>
 
           <div class="dash-chart-toolbar-actions">
-            <!-- Restore hidden dashboard charts -->
-            <template v-if="hiddenDashCharts.length">
+            <!-- Restore hidden charts (built-in + custom) -->
+            <template v-if="allHiddenCharts.length">
               <button
-                v-for="hc in hiddenDashCharts" :key="hc.id"
+                v-for="hc in allHiddenCharts" :key="hc.id"
                 type="button"
                 class="btn btn-ghost btn-sm dash-restore-btn"
                 @click="chartPrefs.toggleVisibility(hc.id)"
@@ -105,16 +105,17 @@
         </div>
       </div>
 
-      <!-- Custom charts from user -->
-      <template v-if="chartPrefs.customCharts.length">
+      <!-- Custom charts from user (only visible ones) -->
+      <template v-if="visibleCustomCharts.length">
         <h3 class="section-title" style="margin-top:1rem;margin-bottom:.5rem">
           <i class="fa-solid fa-wand-magic-sparkles"></i> My charts
         </h3>
         <div class="custom-charts-grid">
           <CustomChartCard
-            v-for="cc in chartPrefs.customCharts"
+            v-for="cc in visibleCustomCharts"
             :key="cc.id"
             :config="cc"
+            @hide="chartPrefs.toggleVisibility"
             @remove="chartPrefs.removeCustomChart"
           />
         </div>
@@ -177,6 +178,21 @@
     const hiddenDashCharts = computed(() =>
       chartPrefs.ALL_CHARTS
         .filter((c) => c.section === 'Dashboard' && !chartPrefs.isVisible(c.id))
+    );
+
+    const hiddenCustomCharts = computed(() =>
+      chartPrefs.customCharts
+        .filter((c) => !chartPrefs.isVisible(c.id))
+        .map((c) => ({ id: c.id, label: c.title }))
+    );
+
+    const allHiddenCharts = computed(() => [
+      ...hiddenDashCharts.value,
+      ...hiddenCustomCharts.value,
+    ]);
+
+    const visibleCustomCharts = computed(() =>
+      chartPrefs.customCharts.filter((c) => chartPrefs.isVisible(c.id))
     );
 
     function saveCustomChart() {
@@ -282,7 +298,7 @@
     return {
       stats, statusNums, chartDept, chartStatus, chartPrefs,
       showPanel, showAddChart, newChart, saveCustomChart,
-      hiddenDashCharts,
+      allHiddenCharts, visibleCustomCharts,
     };
   },
 };

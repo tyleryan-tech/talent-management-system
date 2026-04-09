@@ -81,12 +81,13 @@
   window.TM.CustomChartCard = {
     name: 'CustomChartCard',
     props: { config: { type: Object, required: true } },
-    emits: ['remove'],
+    emits: ['remove', 'hide'],
     template: `
       <div class="card pad chart-card-wrap">
         <div class="chart-card-header">
           <h3 class="section-title" style="margin:0">{{ config.title }}</h3>
-          <button type="button" class="col-th-btn col-th-btn-hide" @click="$emit('remove', config.id)" title="Remove this chart">✕</button>
+          <button type="button" class="chart-hide-btn" @click="$emit('hide', config.id)" title="Hide this chart"><i class="fa-solid fa-eye-slash"></i></button>
+          <button type="button" class="col-th-btn col-th-btn-hide" @click="$emit('remove', config.id)" title="Delete this chart">✕</button>
         </div>
         <p class="muted small">
           {{ scopeLabel }} &middot; by {{ groupByLabel }}

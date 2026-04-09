@@ -1582,6 +1582,8 @@ tr:hover .btn-inline-edit,
   gap: 1rem;
 }
 .chart-card-wrap { display: flex; flex-direction: column; }
+.chart-card-wrap .chart-hide-btn { opacity: 0.6; }
+.chart-card-wrap:hover .chart-hide-btn { opacity: 1; }
 
 /* ======================================================== */
 
