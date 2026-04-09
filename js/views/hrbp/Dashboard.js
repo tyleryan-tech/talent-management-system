@@ -49,7 +49,7 @@
       return [
         { k: 'total', label: 'Total employees', value: emps.length },
         { k: 'emp', label: 'Active (incl. probation)', value: emps.filter((e) => e.status !== 'leave').length },
-        { k: 'leave', label: 'Terminated', value: emps.filter((e) => e.status === 'leave').length },
+        { k: 'leave', label: 'Leaving', value: emps.filter((e) => e.status === 'leave').length },
       ];
     });
 
@@ -61,7 +61,7 @@
       return [
         { label: 'Active', value: cnt.active, color: STATUS_COLORS.active },
         { label: 'Probation', value: cnt.probation, color: STATUS_COLORS.probation },
-        { label: 'Terminated', value: cnt.leave, color: STATUS_COLORS.leave },
+        { label: 'Leaving', value: cnt.leave, color: STATUS_COLORS.leave },
       ];
     });
 
@@ -112,7 +112,7 @@
             data: [
               { name: 'Active', value: st.active || 0, itemStyle: { color: '#6366f1' } },
               { name: 'Probation', value: st.probation || 0, itemStyle: { color: '#f59e0b' } },
-              { name: 'Terminated', value: st.leave || 0, itemStyle: { color: '#ef4444' } },
+              { name: 'Leaving', value: st.leave || 0, itemStyle: { color: '#ef4444' } },
             ],
           }],
         });

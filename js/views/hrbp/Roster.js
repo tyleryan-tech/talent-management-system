@@ -83,7 +83,7 @@ function buildImportFieldMap(json) {
   return window.TM.buildRosterFieldToExcelMap(headers);
 }
 
-const statusMap = { active: 'Active', probation: 'Probation', leave: 'Former' };
+const statusMap = { active: 'Active', probation: 'Probation', leave: 'Leaving' };
 const POT_LABELS = { H: 'High', M: 'Medium', L: 'Low' };
 const tenureFmt = () => window.TM.tenureFormat;
 
@@ -273,7 +273,7 @@ function perfStatusEn(s) {
                     <option value="">All</option>
                     <option value="active">Active</option>
                     <option value="probation">Probation</option>
-                    <option value="leave">Former</option>
+                    <option value="leave">Leaving</option>
                   </select>
                 </template>
                 <template v-else-if="colFilterType(col.key) === 'potential'">
@@ -342,7 +342,7 @@ function perfStatusEn(s) {
               </td>
               <td class="row-actions">
                 <button type="button" class="btn-link" @click="openEdit(e)">Edit</button>
-                <button v-if="e.status !== 'leave'" type="button" class="btn-link danger" @click="doLeave(e)">Offboard</button>
+                <button v-if="e.status !== 'leave'" type="button" class="btn-link danger" @click="doLeave(e)">Mark Leaving</button>
               </td>
             </tr>
           </tbody>
@@ -391,7 +391,7 @@ function perfStatusEn(s) {
               <select v-model="form.status">
                 <option value="active">Active</option>
                 <option value="probation">Probation</option>
-                <option value="leave">Former</option>
+                <option value="leave">Leaving</option>
               </select>
             </label>
             <label class="field"><span>Title</span>
@@ -1013,7 +1013,7 @@ function perfStatusEn(s) {
     }
 
     function doLeave(e) {
-      if (!confirm(`Mark ${e.name} as former employee?`)) return;
+      if (!confirm(`Mark ${e.name} as leaving (pending offboard)?`)) return;
       data.setEmployeeStatus(e.id, 'leave');
       window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Status updated', type: 'success' } }));
     }

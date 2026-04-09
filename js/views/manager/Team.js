@@ -88,7 +88,7 @@ function buildReportTree(data, rootId) {
     }
 
     function empStatusEn(s) {
-      return { active: 'Active', probation: 'Probation', leave: 'Terminated' }[s] || s;
+      return { active: 'Active', probation: 'Probation', leave: 'Leaving' }[s] || s;
     }
 
     const detailKv = computed(() => {

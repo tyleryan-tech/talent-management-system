@@ -722,7 +722,7 @@
       return data.positions.find((p) => p.id === id)?.name || '-';
     }
     function statusLabel(s) {
-      return { active: 'Active', probation: 'Probation', leave: 'Terminated' }[s] || s;
+      return { active: 'Active', probation: 'Probation', leave: 'Leaving' }[s] || s;
     }
 
     function drawDeptCountBar() {
