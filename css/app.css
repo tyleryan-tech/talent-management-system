@@ -610,6 +610,27 @@ select.multi {
   color: var(--primary, #6366f1);
   font-weight: 600;
 }
+.col-filter-input {
+  width: 100%;
+  font-size: 0.72rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  line-height: 1.5;
+  box-sizing: border-box;
+  min-width: 4rem;
+}
+.col-filter-input.col-filter-active {
+  border-color: var(--primary, #6366f1);
+  background: #eff6ff;
+  outline: none;
+}
+.col-filter-input:focus {
+  outline: none;
+  border-color: var(--primary, #6366f1);
+}
 
 /* 表格 */
 .roster-table-viewport {

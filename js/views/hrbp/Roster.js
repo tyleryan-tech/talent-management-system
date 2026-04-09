@@ -1,5 +1,5 @@
 (function () {
-  const { computed, ref } = Vue;
+  const { computed, ref, reactive } = Vue;
   const useDataStore = window.TM.useDataStore;
   const useProductLineStore = window.TM.useProductLineStore;
   const useAuthStore = window.TM.useAuthStore;
@@ -230,13 +230,13 @@ function perfStatusEn(s) {
                 :class="{ 'roster-col-path': col.key === 'teamPath', 'col-th-has-filter': !!colFilterType(col.key) }">
                 <div class="col-th-label">{{ col.labelResolved }}</div>
                 <template v-if="colFilterType(col.key) === 'dept'">
-                  <select v-model.number="filterDept" :class="['col-filter-sel', filterDept ? 'col-filter-active' : '']">
-                    <option :value="0">All</option>
-                    <option v-for="d in data.departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option v-for="d in data.departments" :key="d.id" :value="String(d.id)">{{ d.name }}</option>
                   </select>
                 </template>
                 <template v-else-if="colFilterType(col.key) === 'status'">
-                  <select v-model="filterStatus" :class="['col-filter-sel', filterStatus ? 'col-filter-active' : '']">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
                     <option value="">All</option>
                     <option value="active">Active</option>
                     <option value="probation">Probation</option>
@@ -244,7 +244,7 @@ function perfStatusEn(s) {
                   </select>
                 </template>
                 <template v-else-if="colFilterType(col.key) === 'potential'">
-                  <select v-model="filterPotential" :class="['col-filter-sel', filterPotential ? 'col-filter-active' : '']">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
                     <option value="">All</option>
                     <option value="H">High (H)</option>
                     <option value="M">Medium (M)</option>
@@ -253,17 +253,39 @@ function perfStatusEn(s) {
                   </select>
                 </template>
                 <template v-else-if="colFilterType(col.key) === 'level'">
-                  <select v-model="filterLevel" :class="['col-filter-sel', filterLevel ? 'col-filter-active' : '']">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
                     <option value="">All</option>
                     <option v-for="lv in levelFilterOptions" :key="lv" :value="lv">{{ lv }}</option>
                   </select>
                 </template>
                 <template v-else-if="colFilterType(col.key) === 'gender'">
-                  <select v-model="filterGender" :class="['col-filter-sel', filterGender ? 'col-filter-active' : '']">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
                     <option value="">All</option>
                     <option value="男">Male</option>
                     <option value="女">Female</option>
                   </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'title'">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option value="IC">IC</option>
+                    <option value="PIC">PIC</option>
+                    <option value="RM">RM</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'payPosition'">
+                  <select v-model="colFilters[col.key]" :class="['col-filter-sel', colFilters[col.key] ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option value="below_min">Below min</option>
+                    <option value="p25">P25</option>
+                    <option value="p50">P50</option>
+                    <option value="p75">P75</option>
+                    <option value="above_max">Above max</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'text'">
+                  <input v-model="colFilters[col.key]" type="search" class="col-filter-input"
+                    :class="{ 'col-filter-active': colFilters[col.key] }" placeholder="filter…" />
                 </template>
               </th>
               <th>Actions</th>
@@ -447,11 +469,7 @@ function perfStatusEn(s) {
     const productLine = useProductLineStore();
     const auth = useAuthStore();
     const q = ref('');
-    const filterDept = ref(0);
-    const filterStatus = ref('');
-    const filterPotential = ref('');
-    const filterLevel = ref('');
-    const filterGender = ref('');
+    const colFilters = reactive({});
     const modal = ref(false);
     const modalMode = ref('create');
     const form = ref({});
@@ -461,18 +479,25 @@ function perfStatusEn(s) {
     const fieldEditorRows = ref([]);
     const layoutPreview = ref(null);
 
-    const COLUMN_FILTER_MAP = {
+    const COLUMN_FILTER_TYPE = {
       team: 'dept', teamPath: 'dept',
       status: 'status', statusLabel: 'status',
       potential: 'potential',
       rank: 'level',
       gender: 'gender',
+      title: 'title',
+      payPosition: 'payPosition',
+      // teamId / jobFunctionSlotId 是内部 ID，不需要列筛选
+      teamId: 'none', jobFunctionSlotId: 'none',
     };
-    function colFilterType(key) { return COLUMN_FILTER_MAP[key] || null; }
+    function colFilterType(key) {
+      const t = COLUMN_FILTER_TYPE[key];
+      if (t === 'none') return null;
+      return t || 'text';
+    }
 
     const hasActiveFilters = computed(() =>
-      filterDept.value !== 0 || filterStatus.value !== '' || filterPotential.value !== ''
-      || filterLevel.value !== '' || filterGender.value !== ''
+      Object.values(colFilters).some((v) => v !== '' && v != null)
     );
 
     const visibleRosterColumns = computed(() => window.TM.visibleRosterColumns(
@@ -502,21 +527,31 @@ function perfStatusEn(s) {
 
     const filtered = computed(() => {
       let list = [...data.employees];
-      if (filterDept.value) list = list.filter((e) => e.departmentId === filterDept.value);
-      if (filterStatus.value) list = list.filter((e) => e.status === filterStatus.value);
-      const fp = filterPotential.value;
-      if (fp === '__unset__') {
-        list = list.filter((e) => potentialCodeForEmployee(e.id) == null);
-      } else if (fp) {
-        list = list.filter((e) => potentialCodeForEmployee(e.id) === fp);
-      }
-      if (filterLevel.value) {
-        const lv = filterLevel.value;
-        list = list.filter((e) => posLevel(e.positionId) === lv);
-      }
-      if (filterGender.value) {
-        list = list.filter((e) => String(e.gender || '').trim() === filterGender.value);
-      }
+      Object.entries(colFilters).forEach(([key, val]) => {
+        if (val === '' || val == null) return;
+        const ft = colFilterType(key);
+        if (!ft) return;
+        if (ft === 'dept') {
+          const id = Number(val);
+          list = list.filter((e) => e.departmentId === id);
+        } else if (ft === 'status') {
+          list = list.filter((e) => e.status === val);
+        } else if (ft === 'potential') {
+          if (val === '__unset__') list = list.filter((e) => potentialCodeForEmployee(e.id) == null);
+          else list = list.filter((e) => potentialCodeForEmployee(e.id) === val);
+        } else if (ft === 'level') {
+          list = list.filter((e) => posLevel(e.positionId) === val);
+        } else if (ft === 'gender') {
+          list = list.filter((e) => String(e.gender || '').trim() === val);
+        } else if (ft === 'title') {
+          list = list.filter((e) => normalizeOrgRole(e.orgRole) === val);
+        } else if (ft === 'payPosition') {
+          list = list.filter((e) => e.salaryBand === val);
+        } else if (ft === 'text') {
+          const s = String(val).toLowerCase();
+          list = list.filter((e) => String(rosterTextCell(key, e) ?? '').toLowerCase().includes(s));
+        }
+      });
       if (q.value) {
         const s = q.value.toLowerCase();
         list = list.filter((e) =>
@@ -569,11 +604,7 @@ function perfStatusEn(s) {
     }
 
     function clearRosterFilters() {
-      filterDept.value = 0;
-      filterStatus.value = '';
-      filterPotential.value = '';
-      filterLevel.value = '';
-      filterGender.value = '';
+      Object.keys(colFilters).forEach((k) => { colFilters[k] = ''; });
       q.value = '';
     }
 
@@ -1194,7 +1225,7 @@ function perfStatusEn(s) {
 
     return {
       auth,
-      data, q, filterDept, filterStatus, filterPotential, filterLevel, filterGender,
+      data, q, colFilters,
       selectedIds, selectedSet, allFilteredSelected, toggleSelectRow, toggleSelectAllFiltered, batchDeleteEmployees,
       levelFilterOptions, filtered, statusMap, clearRosterFilters,
       deptName, posName, posLevel, mgrName, tenureHuman, companyTenureLabel, levelTenureLabel, potentialDisplay,
