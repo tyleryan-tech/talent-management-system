@@ -169,10 +169,18 @@
           try {
             await ss.pullWorkspaceQuiet(id);
           } catch (e) {
+            const status = e?.status || 0;
+            if (status === 401 || status === 403) {
+              window.dispatchEvent(new CustomEvent('tm-toast', {
+                detail: { message: e.body?.error || e.message || '加载产品线数据失败', type: 'error' },
+              }));
+              return false;
+            }
+            // 非鉴权错误（网络超时、服务器冷启动等）：静默回退到本地缓存数据
+            data.hydrate();
             window.dispatchEvent(new CustomEvent('tm-toast', {
-              detail: { message: e.body?.error || e.message || '加载产品线数据失败', type: 'error' },
+              detail: { message: '服务器暂时无法访问，已加载本地缓存数据', type: 'warning' },
             }));
-            return false;
           }
           ss.connectWs(id);
         } else {

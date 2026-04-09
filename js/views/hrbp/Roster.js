@@ -198,53 +198,9 @@ function perfStatusEn(s) {
   template: `
     <div class="page-stack roster-page-stack">
       <div class="card pad roster-toolbar-card">
-        <div class="roster-filters-bar">
-          <span class="roster-filters-title muted">Filters</span>
-          <label class="field inline roster-filter-item">
-            <span>Team</span>
-            <select v-model.number="filterDept" class="input short">
-              <option :value="0">All</option>
-              <option v-for="d in data.departments" :key="d.id" :value="d.id">{{ d.name }}</option>
-            </select>
-          </label>
-          <label class="field inline roster-filter-item">
-            <span>Status</span>
-            <select v-model="filterStatus" class="input short">
-              <option value="">All</option>
-              <option value="active">Active</option>
-              <option value="probation">Probation</option>
-              <option value="leave">Former</option>
-            </select>
-          </label>
-          <label class="field inline roster-filter-item">
-            <span>Potential</span>
-            <select v-model="filterPotential" class="input short">
-              <option value="">All</option>
-              <option value="H">High (H)</option>
-              <option value="M">Medium (M)</option>
-              <option value="L">Low (L)</option>
-              <option value="__unset__">Not on grid</option>
-            </select>
-          </label>
-          <label class="field inline roster-filter-item">
-            <span>Rank</span>
-            <select v-model="filterLevel" class="input short">
-              <option value="">All</option>
-              <option v-for="lv in levelFilterOptions" :key="lv" :value="lv">{{ lv }}</option>
-            </select>
-          </label>
-          <label class="field inline roster-filter-item">
-            <span>Gender</span>
-            <select v-model="filterGender" class="input short">
-              <option value="">All</option>
-              <option value="男">Male</option>
-              <option value="女">Female</option>
-            </select>
-          </label>
-          <button type="button" class="btn btn-ghost btn-sm" @click="clearRosterFilters">Reset filters</button>
-        </div>
         <div class="toolbar roster-toolbar-actions">
           <input v-model.trim="q" type="search" class="input search" placeholder="Search name, email, mobile…" />
+          <button v-if="hasActiveFilters" type="button" class="btn btn-ghost btn-sm" @click="clearRosterFilters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
           <button type="button" class="btn btn-primary" @click="openCreate">Add employee</button>
           <button v-if="auth.isHrbp" type="button" class="btn btn-danger" :disabled="!selectedIds.length" @click="batchDeleteEmployees">Delete selected</button>
           <button type="button" class="btn btn-secondary" @click="exportExcel">Export Excel</button>
@@ -270,22 +226,62 @@ function perfStatusEn(s) {
           <thead>
             <tr>
               <th v-if="auth.isHrbp" class="roster-sel"><input type="checkbox" title="Select all in current filter" :checked="allFilteredSelected" @change="toggleSelectAllFiltered($event.target.checked)" /></th>
-              <th v-for="col in visibleRosterColumns" :key="col.key" :class="{ 'roster-col-path': col.key === 'teamPath' }">{{ col.labelResolved }}</th>
+              <th v-for="col in visibleRosterColumns" :key="col.key"
+                :class="{ 'roster-col-path': col.key === 'teamPath', 'col-th-has-filter': !!colFilterType(col.key) }">
+                <div class="col-th-label">{{ col.labelResolved }}</div>
+                <template v-if="colFilterType(col.key) === 'dept'">
+                  <select v-model.number="filterDept" :class="['col-filter-sel', filterDept ? 'col-filter-active' : '']">
+                    <option :value="0">All</option>
+                    <option v-for="d in data.departments" :key="d.id" :value="d.id">{{ d.name }}</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'status'">
+                  <select v-model="filterStatus" :class="['col-filter-sel', filterStatus ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option value="active">Active</option>
+                    <option value="probation">Probation</option>
+                    <option value="leave">Former</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'potential'">
+                  <select v-model="filterPotential" :class="['col-filter-sel', filterPotential ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option value="H">High (H)</option>
+                    <option value="M">Medium (M)</option>
+                    <option value="L">Low (L)</option>
+                    <option value="__unset__">Not on grid</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'level'">
+                  <select v-model="filterLevel" :class="['col-filter-sel', filterLevel ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option v-for="lv in levelFilterOptions" :key="lv" :value="lv">{{ lv }}</option>
+                  </select>
+                </template>
+                <template v-else-if="colFilterType(col.key) === 'gender'">
+                  <select v-model="filterGender" :class="['col-filter-sel', filterGender ? 'col-filter-active' : '']">
+                    <option value="">All</option>
+                    <option value="男">Male</option>
+                    <option value="女">Female</option>
+                  </select>
+                </template>
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="e in filtered" :key="e.id">
               <td v-if="auth.isHrbp" class="roster-sel"><input type="checkbox" :checked="selectedSet.has(e.id)" @change="toggleSelectRow(e.id)" /></td>
-              <td v-for="col in visibleRosterColumns" :key="col.key" :class="rosterTdClass(col.key)" :style="rosterTdStyle(col.key)">
+              <td v-for="col in visibleRosterColumns" :key="col.key"
+                class="roster-td-clip"
+                :class="rosterTdClass(col.key)"
+                :style="rosterTdStyle(col.key)"
+                :title="rosterCellTitle(col.key, e)">
                 <template v-if="col.key === 'displayName'">
                   <button type="button" class="linklike" @click="openDetail(e)">{{ e.name }}</button>
                 </template>
                 <template v-else-if="col.key === 'performance'">
-                  <span class="cell-clip roster-col-perf"><button type="button" class="linklike" @click="openDetail(e)">{{ perfSummaryText(e.id) }}</button></span>
-                </template>
-                <template v-else-if="col.key === 'teamPath'">
-                  <span class="cell-clip" :title="teamPathForDept(e.departmentId)">{{ teamPathForDept(e.departmentId) }}</span>
+                  <button type="button" class="linklike" @click="openDetail(e)">{{ perfSummaryText(e.id) }}</button>
                 </template>
                 <template v-else>{{ rosterTextCell(col.key, e) }}</template>
               </td>
@@ -464,6 +460,20 @@ function perfStatusEn(s) {
     const fieldEditorOpen = ref(false);
     const fieldEditorRows = ref([]);
     const layoutPreview = ref(null);
+
+    const COLUMN_FILTER_MAP = {
+      team: 'dept', teamPath: 'dept',
+      status: 'status', statusLabel: 'status',
+      potential: 'potential',
+      rank: 'level',
+      gender: 'gender',
+    };
+    function colFilterType(key) { return COLUMN_FILTER_MAP[key] || null; }
+
+    const hasActiveFilters = computed(() =>
+      filterDept.value !== 0 || filterStatus.value !== '' || filterPotential.value !== ''
+      || filterLevel.value !== '' || filterGender.value !== ''
+    );
 
     const visibleRosterColumns = computed(() => window.TM.visibleRosterColumns(
       data.rosterColumnSettings || window.TM.defaultRosterColumnSettings(),
@@ -706,6 +716,11 @@ function perfStatusEn(s) {
         case 'statusLabel': return statusMap[e.status] || '—';
         default: return '—';
       }
+    }
+
+    function rosterCellTitle(key, e) {
+      if (key === 'performance') return perfSummaryText(e.id);
+      return String(rosterTextCell(key, e) ?? '');
     }
 
     function exportColumnsResolved() {
@@ -1187,7 +1202,8 @@ function perfStatusEn(s) {
       modal, modalMode, form, positionsInDept,
       openCreate, openEdit, saveEmployee, doLeave, openDetail, detail, detailRows, detailReviews,
       exportExcel, importExcel, appendImportExcel, downloadExcelTemplate,
-      visibleRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle,
+      visibleRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle,
+      colFilterType, hasActiveFilters,
       fieldEditorOpen, fieldEditorRows, layoutPreview,
       openRosterFieldEditor, saveRosterFieldEditor, moveFieldRow, resetRosterFieldsDefault, fieldDefLabel,
       onUploadLayoutHeaders, applyLayoutFromPreview,
