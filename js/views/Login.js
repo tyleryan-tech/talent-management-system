@@ -77,6 +77,10 @@
         return;
       }
       auth.persistSession();
+      // Load per-user chart preferences
+      if (window.TM.chartPrefs) {
+        window.TM.chartPrefs.reload(auth.currentUser?.email || auth.currentUser?.username || '');
+      }
       const ss = window.TM.serverSync;
       const hasServerToken = ss && ss.getToken && ss.getToken();
       if (hasServerToken) {

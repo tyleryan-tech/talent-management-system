@@ -26,6 +26,10 @@
 
   productLineStore.hydrate();
   authStore.restoreSession();
+  // Restore chart preferences for the already-logged-in user
+  if (TM.chartPrefs && authStore.isLoggedIn) {
+    TM.chartPrefs.reload(authStore.currentUser?.email || authStore.currentUser?.username || '');
+  }
 
   let dataLoadedFromServer = false;
   if (useServer && ss.getToken()) {

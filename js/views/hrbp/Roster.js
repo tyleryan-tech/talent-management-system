@@ -519,18 +519,41 @@ function perfStatusEn(s) {
       return window.TM.resolveRosterColumns(s);
     });
 
+    /** Fields that other modules depend on: map from fieldKey → module names */
+    const FIELD_DEPS = {
+      name:           ['Organization', 'Performance', 'Attendance', 'Talent', 'Recruitment'],
+      displayName:    ['Organization', 'Performance', 'Attendance', 'Talent'],
+      team:           ['Organization', 'Analytics'],
+      rank:           ['Performance', 'Analytics', 'Organization'],
+      status:         ['Dashboard', 'Analytics'],
+      hireDate:       ['Attendance'],
+      potential:      ['Talent (9-box)'],
+      positionId:     ['Performance', 'Organization'],
+    };
+
+    /** Warn (toast) if hiding a field that other modules depend on; returns true to proceed anyway. */
+    function _warnFieldDep(key) {
+      const deps = FIELD_DEPS[key];
+      if (!deps || !deps.length) return true;
+      const msg = `隐藏字段 "${key}" 可能影响：${deps.join('、')} 等模块的数据展示。如需恢复，可在 Columns 面板重新显示。`;
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'warning' } }));
+      return true;
+    }
+
     function _getColSettings() {
       const s = data.rosterColumnSettings || window.TM.defaultRosterColumnSettings();
       return { version: 1, columns: JSON.parse(JSON.stringify(s.columns)) };
     }
 
     function quickHideColumn(key) {
+      _warnFieldDep(key);
       const s = _getColSettings();
       const col = s.columns.find((c) => c.key === key);
       if (col) { col.visible = false; data.setRosterColumnSettings(s); }
     }
 
     function toggleColumnVisibility(key, visible) {
+      if (!visible) _warnFieldDep(key);
       const s = _getColSettings();
       const col = s.columns.find((c) => c.key === key);
       if (col) { col.visible = !!visible; data.setRosterColumnSettings(s); }

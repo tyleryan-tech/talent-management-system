@@ -34,6 +34,7 @@
 
   window.TM.HrbpAnalytics = {
     name: 'HrbpAnalytics',
+    components: { CustomChartCard: window.TM.CustomChartCard },
     template: `
     <div class="hrbp-analytics-embed">
       <div class="card pad org-scope-bar">
@@ -53,80 +54,233 @@
             </select>
           </label>
           <p class="muted small org-scope-hint">{{ scopeHint }}</p>
-        </div>
-      </div>
-      <div class="grid-2">
-        <div class="card pad">
-          <h3 class="section-title">各工种在岗人数</h3>
-          <p class="muted small">统计当前组织范围内的<strong>在职</strong>员工（不含离职）；工种取编制岗位名称。受上方<strong>职级</strong>筛选影响。</p>
-          <div ref="cTradeHc" class="chart-box"></div>
-        </div>
-        <div class="card pad">
-          <h3 class="section-title">各职级在岗人数</h3>
-          <p class="muted small">柱顶数字为人数与占<strong>范围内在职总人数</strong>的比例。受组织范围与职级筛选影响。</p>
-          <div ref="cLevelHc" class="chart-box"></div>
-        </div>
-      </div>
-      <div class="card pad">
-        <h3 class="section-title">平均工作年限（按维度）</h3>
-        <p class="muted small">按<strong>参加工作日期</strong>起算（与同页「Work experience」分布一致，缺省按规则推算）。<strong>产品线</strong>维度对比各产品线全员，不受左侧部门子树限制；<strong>团队 / 工种 / 绩效 / 职级</strong>维度受组织范围与职级筛选影响。</p>
-        <label class="field inline org-scope-select" style="margin-bottom:0.75rem">
-          <span><i class="fa-solid fa-layer-group"></i> 分析维度</span>
-          <select v-model="avgTenureDimension" class="input">
-            <option value="product_line">产品线</option>
-            <option value="team">团队（部门）</option>
-            <option value="trade">工种</option>
-            <option value="last_perf">最近一次已定档绩效</option>
-            <option value="rank">职级</option>
-          </select>
-        </label>
-        <div ref="cAvgTenureDim" class="chart-box"></div>
-      </div>
-      <div class="grid-2">
-        <div class="card pad">
-          <h3 class="section-title">Work experience (since career start)</h3>
-          <p class="muted small">Based on <strong>career start date</strong> (not company tenure). If missing, approximated from birthday + 22 years. Click a bar for the list.</p>
-          <div class="rank-btn-row">
-            <button
-              v-for="lv in workExpLevelOptions"
-              :key="'we-' + lv"
-              type="button"
-              :class="['rank-btn', analyticsRankFilter === lv && 'rank-btn-active']"
-              @click="analyticsRankFilter = (analyticsRankFilter === lv ? '' : lv)"
-            >{{ lv }}</button>
-            <button
-              v-if="analyticsRankFilter"
-              type="button"
-              class="rank-btn rank-btn-clear"
-              @click="analyticsRankFilter = ''"
-            ><i class="fa-solid fa-xmark"></i> All ranks</button>
+
+          <!-- Customize charts panel -->
+          <div class="col-picker-wrap" style="margin-left:auto">
+            <button type="button" :class="['btn btn-ghost btn-sm chart-customize-btn', showCustomizePanel && 'btn-active']" @click.stop="showCustomizePanel = !showCustomizePanel">
+              <i class="fa-solid fa-sliders"></i> Customize
+            </button>
+            <div v-if="showCustomizePanel" class="col-picker-panel chart-pref-panel" @click.stop>
+              <div class="col-picker-header">
+                <span><i class="fa-solid fa-sliders"></i> Chart preferences</span>
+                <button class="col-picker-close" @click="showCustomizePanel = false">✕</button>
+              </div>
+              <div class="col-picker-list">
+                <template v-for="section in ['Dashboard', 'Analytics']" :key="section">
+                  <div class="chart-pref-section-label">{{ section }}</div>
+                  <div v-for="chart in chartPrefs.ALL_CHARTS.filter(c => c.section === section)" :key="chart.id" class="col-picker-row">
+                    <label class="col-picker-check">
+                      <input type="checkbox" :checked="chartPrefs.isVisible(chart.id)" @change="chartPrefs.toggleVisibility(chart.id)" />
+                      <span :class="!chartPrefs.isVisible(chart.id) && 'col-picker-hidden-label'">{{ chart.label }}</span>
+                    </label>
+                  </div>
+                </template>
+                <template v-if="chartPrefs.customCharts.length">
+                  <div class="chart-pref-section-label">Custom charts</div>
+                  <div v-for="cc in chartPrefs.customCharts" :key="cc.id" class="col-picker-row">
+                    <span style="flex:1;font-size:.85rem">{{ cc.title }}</span>
+                    <button type="button" class="col-th-btn col-th-btn-hide" @click="chartPrefs.removeCustomChart(cc.id)" title="Remove">✕</button>
+                  </div>
+                </template>
+              </div>
+              <div class="col-picker-footer" style="gap:6px;flex-wrap:wrap">
+                <button type="button" class="btn btn-ghost btn-sm" @click="chartPrefs.resetDefaults()">Reset defaults</button>
+                <button type="button" class="btn btn-primary btn-sm" @click="showCustomizePanel=false; showAddChart=true">
+                  <i class="fa-solid fa-plus"></i> Add custom chart
+                </button>
+              </div>
+            </div>
+            <div v-if="showCustomizePanel" class="col-picker-overlay" @click="showCustomizePanel=false"></div>
           </div>
-          <div ref="cTenure" class="chart-box"></div>
         </div>
-        <div class="card pad">
-          <h3 class="section-title">Dev : QA ratio</h3>
-          <p class="muted small">By <strong>job function name</strong>: dev = Frontend / Mobile / Backend / SDET; QA = QA only; Algorithm and Big Data count toward neither. Active employees only.</p>
-          <div class="devtest-summary">
-            <span>Dev <b>{{ devTest.dev }}</b></span>
-            <span>QA <b>{{ devTest.test }}</b></span>
-            <span v-if="devTest.test > 0" class="devtest-ratio">Ratio <b>{{ devTest.resultText }}</b></span>
-            <span v-else class="muted">No active QA roles; ratio hidden</span>
-          </div>
-          <div ref="cDevTest" class="chart-box short"></div>
+      </div>
+
+      <!-- Add custom chart modal -->
+      <div v-if="showAddChart" class="modal-backdrop" @click.self="showAddChart=false">
+        <div class="modal card" style="max-width:420px">
+          <h3><i class="fa-solid fa-chart-column"></i> Add custom chart</h3>
+          <form @submit.prevent="saveCustomChart">
+            <label class="field">
+              <span>Chart title</span>
+              <input v-model="newChart.title" class="input" required placeholder="e.g. Rank distribution" />
+            </label>
+            <label class="field">
+              <span>Group by</span>
+              <select v-model="newChart.groupBy" class="input">
+                <option v-for="o in chartPrefs.GROUP_BY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Chart type</span>
+              <select v-model="newChart.chartType" class="input">
+                <option v-for="o in chartPrefs.CHART_TYPES" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Employee scope</span>
+              <select v-model="newChart.scope" class="input">
+                <option value="active">Active only (excl. Leaving)</option>
+                <option value="all">All employees (incl. Leaving)</option>
+              </select>
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" @click="showAddChart=false">Cancel</button>
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-plus"></i> Add chart</button>
+            </div>
+          </form>
         </div>
       </div>
       <div class="grid-2">
-        <div class="card pad">
-          <h3 class="section-title">Hire year distribution</h3>
-          <p class="muted small">Active headcount by hire year. Uses the same <strong>Rank</strong> filter as work experience (organization bar above).</p>
-          <div ref="cHireYear" class="chart-box"></div>
+        <template v-if="chartPrefs.isVisible('anl-trade-hc')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">各工种在岗人数</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-trade-hc')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">统计当前组织范围内的<strong>在职</strong>员工（不含离职）；工种取编制岗位名称。受上方<strong>职级</strong>筛选影响。</p>
+            <div ref="cTradeHc" class="chart-box"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-trade-hc')">
+          <i class="fa-solid fa-chart-bar muted"></i><span class="muted">各工种在岗人数</span><span class="chart-show-hint">Click to show</span>
         </div>
-        <div class="card pad">
-          <h3 class="section-title">Hires & exits (demo)</h3>
-          <p class="muted small">Fixed demo series; does not change with org scope.</p>
-          <div ref="cTrend" class="chart-box"></div>
+
+        <template v-if="chartPrefs.isVisible('anl-level-hc')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">各职级在岗人数</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-level-hc')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">柱顶数字为人数与占<strong>范围内在职总人数</strong>的比例。受组织范围与职级筛选影响。</p>
+            <div ref="cLevelHc" class="chart-box"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-level-hc')">
+          <i class="fa-solid fa-chart-bar muted"></i><span class="muted">各职级在岗人数</span><span class="chart-show-hint">Click to show</span>
         </div>
       </div>
+
+      <template v-if="chartPrefs.isVisible('anl-avg-tenure')">
+        <div class="card pad">
+          <div class="chart-card-header">
+            <h3 class="section-title">平均工作年限（按维度）</h3>
+            <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-avg-tenure')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+          </div>
+          <p class="muted small">按<strong>参加工作日期</strong>起算（与同页「Work experience」分布一致，缺省按规则推算）。<strong>产品线</strong>维度对比各产品线全员，不受左侧部门子树限制；<strong>团队 / 工种 / 绩效 / 职级</strong>维度受组织范围与职级筛选影响。</p>
+          <label class="field inline org-scope-select" style="margin-bottom:0.75rem">
+            <span><i class="fa-solid fa-layer-group"></i> 分析维度</span>
+            <select v-model="avgTenureDimension" class="input">
+              <option value="product_line">产品线</option>
+              <option value="team">团队（部门）</option>
+              <option value="trade">工种</option>
+              <option value="last_perf">最近一次已定档绩效</option>
+              <option value="rank">职级</option>
+            </select>
+          </label>
+          <div ref="cAvgTenureDim" class="chart-box"></div>
+        </div>
+      </template>
+      <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-avg-tenure')">
+        <i class="fa-solid fa-chart-line muted"></i><span class="muted">平均工作年限（按维度）</span><span class="chart-show-hint">Click to show</span>
+      </div>
+
+      <div class="grid-2">
+        <template v-if="chartPrefs.isVisible('anl-work-exp')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">Work experience (since career start)</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-work-exp')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">Based on <strong>career start date</strong> (not company tenure). If missing, approximated from birthday + 22 years. Click a bar for the list.</p>
+            <div class="rank-btn-row">
+              <button
+                v-for="lv in workExpLevelOptions"
+                :key="'we-' + lv"
+                type="button"
+                :class="['rank-btn', analyticsRankFilter === lv && 'rank-btn-active']"
+                @click="analyticsRankFilter = (analyticsRankFilter === lv ? '' : lv)"
+              >{{ lv }}</button>
+              <button
+                v-if="analyticsRankFilter"
+                type="button"
+                class="rank-btn rank-btn-clear"
+                @click="analyticsRankFilter = ''"
+              ><i class="fa-solid fa-xmark"></i> All ranks</button>
+            </div>
+            <div ref="cTenure" class="chart-box"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-work-exp')">
+          <i class="fa-solid fa-chart-bar muted"></i><span class="muted">Work experience</span><span class="chart-show-hint">Click to show</span>
+        </div>
+
+        <template v-if="chartPrefs.isVisible('anl-dev-qa')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">Dev : QA ratio</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-dev-qa')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">By <strong>job function name</strong>: dev = Frontend / Mobile / Backend / SDET; QA = QA only; Algorithm and Big Data count toward neither. Active employees only.</p>
+            <div class="devtest-summary">
+              <span>Dev <b>{{ devTest.dev }}</b></span>
+              <span>QA <b>{{ devTest.test }}</b></span>
+              <span v-if="devTest.test > 0" class="devtest-ratio">Ratio <b>{{ devTest.resultText }}</b></span>
+              <span v-else class="muted">No active QA roles; ratio hidden</span>
+            </div>
+            <div ref="cDevTest" class="chart-box short"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-dev-qa')">
+          <i class="fa-solid fa-chart-pie muted"></i><span class="muted">Dev : QA ratio</span><span class="chart-show-hint">Click to show</span>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <template v-if="chartPrefs.isVisible('anl-hire-year')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">Hire year distribution</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-hire-year')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">Active headcount by hire year. Uses the same <strong>Rank</strong> filter as work experience (organization bar above).</p>
+            <div ref="cHireYear" class="chart-box"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-hire-year')">
+          <i class="fa-solid fa-chart-bar muted"></i><span class="muted">Hire year distribution</span><span class="chart-show-hint">Click to show</span>
+        </div>
+
+        <template v-if="chartPrefs.isVisible('anl-trend')">
+          <div class="card pad">
+            <div class="chart-card-header">
+              <h3 class="section-title">Hires &amp; exits (demo)</h3>
+              <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-trend')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
+            </div>
+            <p class="muted small">Fixed demo series; does not change with org scope.</p>
+            <div ref="cTrend" class="chart-box"></div>
+          </div>
+        </template>
+        <div v-else class="card pad chart-hidden-placeholder" @click="chartPrefs.toggleVisibility('anl-trend')">
+          <i class="fa-solid fa-chart-line muted"></i><span class="muted">Hires &amp; exits</span><span class="chart-show-hint">Click to show</span>
+        </div>
+      </div>
+
+      <!-- Custom charts added by user -->
+      <template v-if="chartPrefs.customCharts.length">
+        <div class="custom-charts-section">
+          <h3 class="section-title" style="margin-top:1.5rem;margin-bottom:.5rem">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> My charts
+          </h3>
+          <div class="custom-charts-grid">
+            <CustomChartCard
+              v-for="cc in chartPrefs.customCharts"
+              :key="cc.id"
+              :config="cc"
+              @remove="chartPrefs.removeCustomChart"
+            />
+          </div>
+        </div>
+      </template>
 
       <div v-if="tenureModalOpen" class="modal-backdrop" @click.self="tenureModalOpen = false">
         <div class="modal card wide">
@@ -156,6 +310,7 @@
     setup() {
       const data = useDataStore();
       const hrScope = useHrScopeStore();
+      const chartPrefs = window.TM.chartPrefs;
       const {
         scopeDeptIds,
         scopeRootDeptUi,
@@ -180,6 +335,19 @@
       const tenureModalOpen = ref(false);
       const tenureModalBucket = ref('');
       const tenureModalRows = ref([]);
+
+      // Customize panel state
+      const showCustomizePanel = ref(false);
+      const showAddChart = ref(false);
+      const newChart = ref({ title: '', groupBy: 'rank', chartType: 'bar', scope: 'active' });
+
+      function saveCustomChart() {
+        if (!newChart.value.title.trim()) return;
+        chartPrefs.addCustomChart({ ...newChart.value });
+        showAddChart.value = false;
+        newChart.value = { title: '', groupBy: 'rank', chartType: 'bar', scope: 'active' };
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Custom chart added', type: 'success' } }));
+      }
 
       let workExpBucketMembers = {};
       let chTenure;
@@ -661,6 +829,11 @@
 
         watch(() => hrScope.scopeRootDepartmentId, () => { redrawAll(); });
 
+        // Re-render when chart visibility changes (v-if re-creates the DOM node)
+        watch(() => chartPrefs.hidden.slice(), () => {
+          Vue.nextTick(() => { redrawAll(); });
+        });
+
         window.addEventListener('resize', () => charts.forEach((c) => c.resize()));
       });
 
@@ -675,6 +848,7 @@
         analyticsRankFilter, avgTenureDimension, levelOptions, workExpLevelOptions, devTest,
         tenureModalOpen, tenureModalBucket, tenureModalRows,
         deptLabel, posLabel, levelLabel, formatWorkExpLabel, careerStartDisplay,
+        chartPrefs, showCustomizePanel, showAddChart, newChart, saveCustomChart,
       };
     },
   };

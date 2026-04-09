@@ -1457,6 +1457,85 @@ th:hover .col-th-actions {
   gap: 0.15rem;
 }
 
+/* ========================================================
+   Chart card personalization — hide / customize
+   ======================================================== */
+
+/* Header row shared by every chart card */
+.chart-card-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .5rem;
+}
+.chart-card-header .section-title { margin: 0; flex: 1; }
+
+/* Subtle hide icon button — only visible on hover */
+.chart-hide-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: .8rem;
+  opacity: 0;
+  transition: opacity .15s, background .15s, color .15s;
+}
+.card:hover .chart-hide-btn { opacity: 1; }
+.chart-hide-btn:hover { background: #f1f5f9; color: #ef4444; }
+
+/* Placeholder for a hidden chart — compact strip */
+.chart-hidden-placeholder {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: 56px;
+  cursor: pointer;
+  border: 2px dashed var(--border) !important;
+  background: #fafafa !important;
+  transition: border-color .15s, background .15s;
+}
+.chart-hidden-placeholder:hover { border-color: var(--primary) !important; background: #f0f0ff !important; }
+.chart-hidden-placeholder .muted { flex: 1; font-size: .85rem; }
+.chart-show-hint {
+  font-size: .75rem;
+  color: var(--primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Customize panel button */
+.chart-customize-btn { white-space: nowrap; }
+.chart-customize-btn.btn-active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+/* Customize panel — reuses .col-picker-panel style, slight overrides */
+.chart-pref-panel { min-width: 260px; max-width: 300px; right: 0; left: auto; }
+.chart-pref-section-label {
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: #94a3b8;
+  padding: .5rem .75rem .2rem;
+}
+
+/* Custom charts grid */
+.custom-charts-section { margin-top: .5rem; }
+.custom-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.chart-card-wrap { display: flex; flex-direction: column; }
+
+/* ======================================================== */
+
 /* 响应式 */
 @media (max-width: 900px) {
   .layout {
