@@ -1258,6 +1258,15 @@ th:hover .col-th-actions {
   margin-left: 0.65rem;
 }
 
+.btn-inline-edit {
+  opacity: 0;
+  margin-left: 0.35rem;
+  font-size: 0.8em;
+  transition: opacity 0.15s;
+}
+tr:hover .btn-inline-edit,
+.btn-inline-edit:focus { opacity: 1; }
+
 .pos-create-options .checkbox-inline {
   display: flex;
   align-items: flex-start;

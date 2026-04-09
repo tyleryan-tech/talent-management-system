@@ -525,6 +525,7 @@ window.TM.useDataStore = defineStore('data', {
         name,
         level: normalizeJobLevel(row.level),
         departmentId: depId,
+        reportingManagerId: row.reportingManagerId || null,
       });
       this.persistAll();
       return id;
@@ -546,6 +547,7 @@ window.TM.useDataStore = defineStore('data', {
         name,
         departmentId: depId,
         level: normalizeJobLevel(merged.level),
+        reportingManagerId: merged.reportingManagerId || null,
       };
       this.persistAll();
       return true;
@@ -671,8 +673,10 @@ window.TM.useDataStore = defineStore('data', {
             name: payload.name,
             level: payload.level,
             departmentId: payload.departmentId,
+            reportingManagerId: payload.reportingManagerId || null,
           });
           if (nid == null) break;
+          payload.createdId = nid;
           if (payload.markRecruitAfter) {
             this.setPositionRecruitTagged(Number(payload.departmentId), nid, true);
           }

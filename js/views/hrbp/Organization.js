@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   const { computed, onMounted, onUnmounted, ref, watch } = Vue;
   const useDataStore = window.TM.useDataStore;
   const useAuthStore = window.TM.useAuthStore;
@@ -28,11 +28,14 @@
       .replace(/"/g, '&quot;');
   }
 
+  const STATUS_LABEL_MAP = { active: 'Active', probation: 'Probation', leave: 'Leaving' };
+
   /** 某部门下的岗位编制节点（与人名分行；空岗可标待招） */
   function buildPositionNodes(deptId, data, ec) {
     const G = ec.graphic.LinearGradient;
     const fillFilled = new G(0, 0, 0, 1, [{ offset: 0, color: '#ecfdf5' }, { offset: 1, color: '#d1fae5' }]);
     const fillVacant = new G(0, 0, 0, 1, [{ offset: 0, color: '#f8fafc' }, { offset: 1, color: '#e8eef5' }]);
+    const fillVacantOpen = new G(0, 0, 0, 1, [{ offset: 0, color: '#fff7ed' }, { offset: 1, color: '#ffedd5' }]);
     const tags = data.positionRecruitTags || {};
     return [...data.positions]
       .filter((p) => p.departmentId === deptId)
@@ -45,15 +48,21 @@
         const recEntry = recruitTagEntry(tags, deptId, p.id);
         const recruiting = vacant && recEntry != null;
         const recruitPr = recruiting ? recEntry.priority : null;
+        const empLines = vacant
+          ? []
+          : assignees.map((e) => {
+              const n = String(e.name).replace(/[{}|]/g, '');
+              const s = STATUS_LABEL_MAP[e.status] || '';
+              return `${n} (${s})`;
+            });
         const empDisplay = vacant
-          ? (recruiting ? 'Open' : '\u3000')
-          : assignees.map((e) => String(e.name).replace(/[{}|]/g, '')).join('\n');
+          ? (recruiting ? '⬚ Open' : '⬚ Vacant')
+          : empLines.join('\n');
         const safePn = String(p.name).replace(/[{}|]/g, '');
         const safeEm = String(empDisplay).replace(/[{}|]/g, '');
-        /** 人名纵向排列时按行数拉高节点，避免与相邻岗位重叠 */
         const emLineCount = vacant ? 1 : Math.max(1, assignees.length);
         const boxH = Math.max(48, 26 + emLineCount * 16 + 6);
-        const boxW = 128;
+        const boxW = 148;
         let recruitBorder = '#f59e0b';
         let recruitEmColor = '#b45309';
         if (recruiting) {
@@ -81,7 +90,7 @@
           symbol: 'roundRect',
           symbolSize: [boxW, boxH],
           itemStyle: {
-            color: vacant ? fillVacant : fillFilled,
+            color: recruiting ? fillVacantOpen : vacant ? fillVacant : fillFilled,
             borderColor: recruiting ? recruitBorder : vacant ? '#94a3b8' : '#10b981',
             borderWidth: recruiting ? (recruitPr === 'high' ? 2.5 : 2) : 1.5,
             shadowBlur: 10,
@@ -105,8 +114,8 @@
               },
               em: {
                 fontSize: 11,
-                fontWeight: recruiting ? '600' : vacant ? '400' : '500',
-                color: recruiting ? recruitEmColor : vacant ? '#cbd5e1' : '#047857',
+                fontWeight: recruiting ? '600' : vacant ? '500' : '500',
+                color: recruiting ? recruitEmColor : vacant ? '#64748b' : '#047857',
                 align: 'center',
                 padding: [0, 6, 4, 6],
                 lineHeight: 16,
@@ -159,16 +168,21 @@
         const head = data.employees.find((e) => e.id === d.managerId);
         const count = data.employees.filter((e) => e.departmentId === d.id && e.status !== 'leave').length;
         const posCount = data.positions.filter((p) => p.departmentId === d.id).length;
+        const vacantCount = posCount - new Set(
+          data.employees
+            .filter((e) => e.departmentId === d.id && e.status !== 'leave' && e.positionId != null)
+            .map((e) => e.positionId),
+        ).size;
         const sub = head
-          ? `${head.name} · ${count} on duty · ${posCount} slots`
-          : `${count} on duty · ${posCount} slots`;
+          ? `${head.name} · HC ${count}/${posCount}` + (vacantCount > 0 ? ` · ${vacantCount} vacant` : '')
+          : `HC ${count}/${posCount}` + (vacantCount > 0 ? ` · ${vacantCount} vacant` : '');
         const safeName = String(d.name).replace(/[{}|]/g, '');
         const safeSub = String(sub).replace(/[{}|]/g, '');
         const subDeptChildren = buildTree(deps, d.id, data, depth + 1, ec);
         const posChildren = buildPositionNodes(d.id, data, ec);
         return {
           name: d.name,
-          meta: { type: 'department', deptId: d.id, headName: head?.name || '', count, posCount },
+          meta: { type: 'department', deptId: d.id, headName: head?.name || '', count, posCount, vacantCount },
           symbol: 'roundRect',
           symbolSize: depth === 0 ? [124, 52] : depth === 1 ? [116, 48] : [104, 44],
           itemStyle: {
@@ -220,13 +234,13 @@
     <div class="page-stack">
       <div class="toolbar card pad wrap">
         <button type="button" class="btn btn-primary" @click="openDept('create')">Add department</button>
-        <button type="button" class="btn btn-secondary" @click="openPos('create')">Add headcount slot</button>
-        <span class="muted">Drag department rows to change hierarchy: drop on another department to make it a child; drop on the <strong>top-level zone</strong> below to clear parent. <strong>All changes go through approval</strong> (see requests below).</span>
+        <button type="button" class="btn btn-secondary" @click="openPos('create')">Add Target HC</button>
+        <span class="muted">拖拽部门行可调整层级关系。所有结构变更需审批。</span>
       </div>
       <section class="card pad">
         <h3 class="section-title">Organization change approval</h3>
-        <p class="muted small">Adding/removing departments, changing reporting lines, and adding/removing/updating headcount slots require approval from each department head in order, with the <strong>product line owner</strong> as final approver. Managers can act in <strong>Org approvals</strong> in the sidebar.</p>
-        <p class="muted small">Tagging <strong>open roles</strong> or recruiting priority on vacant slots is recruiting maintenance and <strong>does not</strong> need org-structure approval (same rules as Recruitment).</p>
+        <p class="muted small">增删部门、调整汇报关系、增删改 Target HC 均需逐级审批，<strong>产品线负责人</strong>为最终审批人。汇报经理可在侧边栏 <strong>Org approvals</strong> 中操作。</p>
+        <p class="muted small">标记<strong>空编招聘</strong>及优先级属于招聘运营操作，<strong>不需要</strong>组织架构审批（与 Recruitment 模块同规则）。</p>
         <label class="field inline" style="margin-bottom:12px">
           <span>Product line owner (final approver)</span>
           <select v-model.number="orgOwnerId" class="input">
@@ -268,7 +282,7 @@
           <i class="fa-solid fa-layer-group"></i> Drop here: set as top-level (no parent)
         </div>
         <table class="data-table compact dept-drag-table">
-          <thead><tr><th class="col-drag"></th><th>Department</th><th>Parent</th><th>Head</th><th>Slots</th><th>Filled</th><th></th></tr></thead>
+          <thead><tr><th class="col-drag"></th><th>Department</th><th>Parent</th><th>Head</th><th>Target HC</th><th>Current HC</th><th></th></tr></thead>
           <tbody>
             <tr
               v-for="row in deptRowsFlat"
@@ -285,14 +299,14 @@
               <td class="col-drag" title="Drag to reorder"><i class="fa-solid fa-grip-vertical muted"></i></td>
               <td :style="{ paddingLeft: (12 + row.depth * 16) + 'px' }">
                 <span v-if="row.depth" class="dept-tree-prefix muted">└ </span>{{ row.dept.name }}
+                <button type="button" class="btn-link btn-inline-edit" @click="openDept('edit', row.dept)" title="Edit department"><i class="fa-solid fa-pen-to-square"></i></button>
               </td>
               <td>{{ parentDeptName(row.dept.parentId) }}</td>
               <td>{{ empName(row.dept.managerId) }}</td>
               <td>{{ deptPositionCount(row.dept.id) }}</td>
               <td>{{ deptOnDutyCount(row.dept.id) }}</td>
               <td class="dept-row-actions">
-                <button type="button" class="btn-link" @click.stop="openPos('create', null, row.dept.id)">New slot</button>
-                <button type="button" class="btn-link" @click="openDept('edit', row.dept)">Edit</button>
+                <button type="button" class="btn-link" @click.stop="openPos('create', null, row.dept.id)">New HC slot</button>
               </td>
             </tr>
           </tbody>
@@ -300,16 +314,17 @@
       </div>
       <div class="card pad org-chart-card">
         <h3 class="section-title">Organization chart</h3>
-        <p class="muted small org-chart-hint">Root is the <strong>product line</strong> (owner defaults to the product department head from master data if set, else the first top-level department head). Reporting lines flow top-down. <strong>Structural changes</strong> are not applied until approved. <strong>Position nodes</strong> stack names vertically; empty slots grow taller when needed. <strong>Click a department</strong> to expand/collapse children and <strong>slots</strong>; <strong>right-click</strong> a department to <strong>add a headcount slot</strong> (with approval; optional “mark open after create”). <strong>Click a slot</strong> for incumbents; only <strong>vacant</strong> slots can be tagged open / priority (no org approval). Open-role borders: <strong class="recruit-legend high">High</strong>, <strong class="recruit-legend medium">Medium</strong>, <strong class="recruit-legend low">Low</strong>.</p>
+        <p class="muted small org-chart-hint">默认收起，<strong>点击部门</strong>展开下属和 Target HC。<strong>右键</strong>部门新增 Target HC。节点显示员工姓名+状态，<strong>空编</strong>标 Vacant，点击可<strong>创建招聘需求</strong>。优先级：<strong class="recruit-legend high">High</strong>、<strong class="recruit-legend medium">Medium</strong>、<strong class="recruit-legend low">Low</strong>。</p>
+        <!-- old hint removed -->
         <div ref="chartRef" class="chart-tall org-chart-canvas"></div>
-        <h4 class="subsection-title">Active headcount by department</h4>
-        <p class="muted small">Active (non-terminated) employees per department; matches department nodes on the chart.</p>
+        <h4 class="subsection-title">Current HC by department</h4>
+        <p class="muted small">Active (non-leaving) employees per department; matches department nodes on the chart.</p>
         <div ref="deptCountBarRef" class="chart-box short dept-in-org-bar"></div>
       </div>
 
       <div class="card pad">
-        <h3 class="section-title">Open recruiting slots</h3>
-        <p class="muted small">Slots marked <strong>open</strong> that are still vacant; sorted <strong>High → Medium → Low</strong> priority. Adjust or clear here (<strong>no org approval</strong>). Syncs to <router-link to="/hrbp/recruitment">Recruitment · overview</router-link> (upload process data there).</p>
+        <h3 class="section-title">Open recruitment requests</h3>
+        <p class="muted small">标记为 <strong>Open</strong> 的空编 Target HC，按 <strong>High → Medium → Low</strong> 排序。可在此调整优先级或取消标记（<strong>无需审批</strong>）。与 <router-link to="/hrbp/recruitment">Recruitment</router-link> 模块同步。</p>
         <table v-if="recruitListRows.length" class="data-table compact recruit-list-table">
           <thead><tr><th>Priority</th><th>Department</th><th>Role</th><th>Level</th><th></th></tr></thead>
           <tbody>
@@ -358,7 +373,7 @@
 
       <div v-if="posModal" class="modal-backdrop" @click.self="posModal = false">
         <div class="modal card">
-          <h3>{{ posMode === 'create' ? 'Add headcount slot' : 'Edit headcount slot' }}</h3>
+          <h3>{{ posMode === 'create' ? 'Add Target HC' : 'Edit Target HC' }}</h3>
           <form class="form-grid" @submit.prevent="savePos">
             <label class="field"><span>Department</span>
               <select v-model.number="posForm.departmentId" required>
@@ -384,10 +399,22 @@
                 <option v-for="lv in jobLevelsList" :key="lv" :value="lv">{{ lv }}</option>
               </select>
             </label>
+            <label class="field"><span>Reporting Manager</span>
+              <select v-model.number="posForm.reportingManagerId">
+                <option :value="null">— None —</option>
+                <option v-for="mgr in deptManagerOptions" :key="mgr.id" :value="mgr.id">{{ mgr.name }}</option>
+              </select>
+            </label>
             <label v-if="posMode === 'create'" class="field full pos-create-options">
               <span class="checkbox-inline">
                 <input type="checkbox" v-model="posMarkRecruitAfterCreate" />
                 Mark as open after create (adds vacant slot to open list; set priority later)
+              </span>
+            </label>
+            <label v-if="posMode === 'create'" class="field full pos-create-options">
+              <span class="checkbox-inline">
+                <input type="checkbox" v-model="posCreateRecruitReq" />
+                Create recruitment request for this position
               </span>
             </label>
             <div class="modal-actions">
@@ -401,15 +428,15 @@
 
       <div v-if="slotModal && slotPosition" class="modal-backdrop" @click.self="closeSlotModal">
         <div class="modal card wide">
-          <h3>Headcount slot · {{ slotPosition.name }}</h3>
+          <h3>Target HC · {{ slotPosition.name }}</h3>
           <div class="form-grid" style="margin-bottom:12px">
-            <p class="muted small" style="grid-column:1/-1">Department: <strong>{{ deptName(slotCtx.deptId) }}</strong> · Level: <strong>{{ slotPosition.level || '—' }}</strong></p>
+            <p class="muted small" style="grid-column:1/-1">Department: <strong>{{ deptName(slotCtx.deptId) }}</strong> · Level: <strong>{{ slotPosition.level || '—' }}</strong> · Reporting Manager: <strong>{{ slotPosition.reportingManagerId ? empName(slotPosition.reportingManagerId) : '—' }}</strong></p>
             <div style="grid-column:1/-1">
-              <div class="muted small" style="margin-bottom:6px">Incumbents</div>
+              <div class="muted small" style="margin-bottom:6px">Current HC (Incumbents)</div>
               <ul v-if="slotAssignees.length" class="member-list">
                 <li v-for="e in slotAssignees" :key="e.id">{{ e.name }} · {{ statusLabel(e.status) }}</li>
               </ul>
-              <p v-else class="muted small">No incumbents (empty on chart; you can mark as open)</p>
+              <p v-else class="muted small">No incumbents — this is a <strong>vacant</strong> position. You can mark as open or create a recruitment request.</p>
             </div>
             <label v-if="slotRecruiting" class="field" style="grid-column:1/-1">
               <span>Recruiting priority</span>
@@ -421,10 +448,13 @@
             </label>
           </div>
           <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
-            <button v-if="slotVacant" type="button" class="btn" :class="slotRecruiting ? 'btn-secondary' : 'btn-primary'" @click="toggleRecruitSlot">
+            <button v-if="slotVacant && !slotRecruiting" type="button" class="btn btn-primary" @click="createRecruitFromSlot">
+              <i class="fa-solid fa-plus"></i> Create recruitment request
+            </button>
+            <button v-if="slotVacant" type="button" class="btn" :class="slotRecruiting ? 'btn-secondary' : 'btn-ghost'" @click="toggleRecruitSlot">
               {{ slotRecruiting ? 'Clear open tag' : 'Mark as open' }}
             </button>
-            <button type="button" class="btn btn-secondary" @click="openPosFromSlot">Edit slot</button>
+            <button type="button" class="btn btn-secondary" @click="openPosFromSlot">Edit HC slot</button>
             <button type="button" class="btn btn-ghost" @click="closeSlotModal">Close</button>
           </div>
         </div>
@@ -446,8 +476,27 @@
 
     const posModal = ref(false);
     const posMode = ref('create');
-    const posForm = ref({ name: '', level: 'EE', departmentId: 1, id: null });
+    const posForm = ref({ name: '', level: 'EE', departmentId: 1, id: null, reportingManagerId: null });
     const posMarkRecruitAfterCreate = ref(false);
+    const posCreateRecruitReq = ref(false);
+
+    /** Managers in the currently selected department (for reporting manager dropdown) */
+    const deptManagerOptions = computed(() => {
+      const deptId = Number(posForm.value?.departmentId);
+      if (Number.isNaN(deptId)) return [];
+      const dept = data.departments.find((d) => d.id === deptId);
+      const mgrs = [];
+      if (dept?.managerId != null) {
+        const e = data.employees.find((x) => x.id === dept.managerId);
+        if (e) mgrs.push(e);
+      }
+      data.employees.forEach((e) => {
+        if (e.departmentId === deptId && e.status !== 'leave' && !mgrs.some((m) => m.id === e.id)) {
+          mgrs.push(e);
+        }
+      });
+      return mgrs;
+    });
 
     const jobTradesList = computed(() => window.TM.JOB_TRADES || ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data']);
     const jobLevelsList = computed(() => window.TM.JOB_LEVELS || ['E', 'SE', 'EE', 'SEE', 'AM', 'M', 'PE', 'SM']);
@@ -501,9 +550,9 @@
         dept_create: 'Add department',
         dept_delete: 'Remove department',
         dept_update: 'Department change',
-        position_create: 'Add headcount slot',
-        position_delete: 'Remove headcount slot',
-        position_update: 'Update headcount slot',
+        position_create: 'Add Target HC',
+        position_delete: 'Remove Target HC',
+        position_update: 'Update Target HC',
       }[t] || t;
     }
     function orgStatusLabel(s) {
@@ -747,7 +796,7 @@
         yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { type: 'dashed' } } },
         series: [{
           type: 'bar',
-          name: 'Active headcount',
+          name: 'Current HC',
           data: vals,
           itemStyle: { color: '#f59e0b', borderRadius: [6, 6, 0, 0] },
         }],
@@ -779,7 +828,7 @@
       const roots = buildTree(data.departments, null, data, 0, ec);
       const headCount = data.employees.filter((e) => e.status !== 'leave').length;
       const leader = String(productLineLeaderName()).replace(/[{}|]/g, '');
-      const subLabel = `Owner: ${leader} · ${headCount} active · click to expand`;
+      const subLabel = `Owner: ${leader} · Current HC: ${headCount} · click to expand`;
       const treeZoom = computeOrgTreeZoom(data);
       const treeData = [{
         name: 'Product line',
@@ -831,28 +880,33 @@
             }
             if (m?.type === 'position') {
               const dname = data.departments.find((d) => d.id === m.deptId)?.name || '—';
-              const nameList = data.employees
-                .filter((e) => e.positionId === m.positionId && e.departmentId === m.deptId && e.status !== 'leave')
-                .map((e) => e.name);
-              const namesHtml = nameList.length
-                ? nameList.map((n) => `<div style="margin:2px 0">${escapeHtml(n)}</div>`).join('')
-                : '(empty)';
+              const empList = data.employees
+                .filter((e) => e.positionId === m.positionId && e.departmentId === m.deptId && e.status !== 'leave');
+              const namesHtml = empList.length
+                ? empList.map((e) => {
+                    const st = STATUS_LABEL_MAP[e.status] || e.status;
+                    const stColor = e.status === 'probation' ? '#f59e0b' : e.status === 'leave' ? '#ef4444' : '#10b981';
+                    return `<div style="margin:2px 0">${escapeHtml(e.name)} <span style="color:${stColor};font-size:11px;font-weight:600">${escapeHtml(st)}</span></div>`;
+                  }).join('')
+                : '<div style="color:#64748b">(vacant — click to create recruitment)</div>';
               const rec = m.vacant && data.isPositionRecruitTagged(m.deptId, m.positionId);
               const pr = rec ? (data.getPositionRecruitPriority(m.deptId, m.positionId) || 'medium') : null;
               const prEn = pr === 'high' ? 'High' : pr === 'low' ? 'Low' : 'Medium';
               return `<div style="font-weight:600;margin-bottom:6px">${nm}</div>`
                 + `<div style="opacity:.9;line-height:1.65">Department: <b>${escapeHtml(dname)}</b></div>`
                 + `<div style="opacity:.9">Level: <b>${escapeHtml(m.positionLevel || '—')}</b></div>`
-                + `<div style="opacity:.9">Incumbents:</div><div style="opacity:.95;line-height:1.5">${namesHtml}</div>`
-                + (m.vacant ? `<div style="opacity:.85;margin-top:4px">${rec ? `Marked <b>open</b> · priority <b>${prEn}</b>` : 'Not marked open; click node to tag'}</div>` : '')
+                + `<div style="opacity:.9">Current HC:</div><div style="opacity:.95;line-height:1.5">${namesHtml}</div>`
+                + (m.vacant ? `<div style="opacity:.85;margin-top:4px">${rec ? `Marked <b>open</b> · priority <b>${prEn}</b>` : 'Vacant — click node to mark open or create recruitment'}</div>` : '')
                 + `<div style="opacity:.55;font-size:11px;margin-top:8px">Click node for details</div>`;
             }
             if (!m) return nm;
             const pc = m.posCount != null ? m.posCount : data.positions.filter((p) => p.departmentId === m.deptId).length;
+            const vc = m.vacantCount || 0;
             return `<div style="font-weight:600;margin-bottom:6px">${nm}</div>`
               + `<div style="opacity:.9;line-height:1.65">Head: <b>${escapeHtml(m.headName || '—')}</b></div>`
-              + `<div style="opacity:.9">Headcount slots: <b>${escapeHtml(pc)}</b> · Filled: <b>${escapeHtml(m.count)}</b></div>`
-              + `<div style="opacity:.55;font-size:11px;margin-top:8px">Click to expand; <b>right-click</b> to add a slot here</div>`;
+              + `<div style="opacity:.9">Target HC: <b>${escapeHtml(pc)}</b> · Current HC: <b>${escapeHtml(m.count)}</b></div>`
+              + (vc > 0 ? `<div style="opacity:.9;color:#f59e0b">Vacant: <b>${escapeHtml(vc)}</b></div>` : '')
+              + `<div style="opacity:.55;font-size:11px;margin-top:8px">Click to expand; <b>right-click</b> to add a Target HC here</div>`;
           },
         },
         series: [{
@@ -869,7 +923,7 @@
           zoom: treeZoom,
           scaleLimit: { min: 0.22, max: 2.8 },
           symbolOffset: [0, 0],
-          initialTreeDepth: 2,
+          initialTreeDepth: 1,
           layerPadding: 26,
           nodePadding: 12,
           lineStyle: {
@@ -1027,6 +1081,7 @@
     function openPos(mode, row, presetDeptId) {
       posMode.value = mode;
       posMarkRecruitAfterCreate.value = false;
+      posCreateRecruitReq.value = false;
       const list = window.TM.JOB_TRADES || ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data'];
       if (mode === 'create') {
         const did = presetDeptId != null && !Number.isNaN(Number(presetDeptId))
@@ -1034,72 +1089,116 @@
           : Number(data.departments[0]?.id);
         const taken = tradeNamesTakenInDept(did);
         const first = list.find((t) => !taken.has(t)) || list[0];
-        posForm.value = { name: first, level: 'EE', departmentId: did };
+        posForm.value = { name: first, level: 'EE', departmentId: did, reportingManagerId: null };
       } else {
-        posForm.value = { ...row };
+        posForm.value = { ...row, reportingManagerId: row?.reportingManagerId || null };
       }
       posModal.value = true;
     }
 
     function savePos() {
       if (posMode.value === 'create') {
-        const { name, level, departmentId } = posForm.value;
+        const { name, level, departmentId, reportingManagerId } = posForm.value;
         const depId = Number(departmentId);
         const taken = tradeNamesTakenInDept(depId);
         if (taken.has(String(name || '').trim())) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'This department already has that job slot', type: 'error' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '该部门已存在该工种的 Target HC', type: 'error' } }));
           return;
         }
-        data.submitOrgChangeRequest({
+        const result = data.submitOrgChangeRequest({
           type: 'position_create',
-          title: `Add headcount slot: ${name} (dept ${deptName(depId)})`,
+          title: `Add Target HC: ${name} (dept ${deptName(depId)})`,
           payload: {
             departmentId: depId,
             name,
             level,
+            reportingManagerId: reportingManagerId || null,
             markRecruitAfter: !!posMarkRecruitAfterCreate.value,
           },
         });
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: new headcount slot', type: 'success' } }));
+        if (result) {
+          if (posCreateRecruitReq.value && result.status === 'approved') {
+            data.setPositionRecruitTagged(depId, result.payload?.createdId || 0, true);
+          }
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: {
+              message: result.status === 'approved'
+                ? 'Target HC 已创建（无需审批，已自动生效）'
+                : '已提交审批：新增 Target HC',
+              type: 'success',
+            },
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '创建失败，请检查数据', type: 'error' } }));
+        }
       } else {
         const orig = data.positions.find((p) => p.id === posForm.value.id);
-        if (!orig) return;
+        if (!orig) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '找不到该 Target HC 记录', type: 'error' } }));
+          return;
+        }
         const patch = {};
         if (String(posForm.value.name).trim() !== String(orig.name).trim()) patch.name = posForm.value.name;
         if (String(posForm.value.level).trim() !== String(orig.level || '').trim()) patch.level = posForm.value.level;
         if (Number(posForm.value.departmentId) !== Number(orig.departmentId)) patch.departmentId = Number(posForm.value.departmentId);
+        const newMgr = posForm.value.reportingManagerId || null;
+        const oldMgr = orig.reportingManagerId || null;
+        if (newMgr !== oldMgr) patch.reportingManagerId = newMgr;
         if (Object.keys(patch).length === 0) {
           posModal.value = false;
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '未检测到更改', type: 'info' } }));
           return;
         }
-        data.submitOrgChangeRequest({
+        const result = data.submitOrgChangeRequest({
           type: 'position_update',
-          title: `Update headcount slot "${orig.name}"`,
+          title: `Update Target HC "${orig.name}"`,
           payload: { id: orig.id, patch },
         });
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: update headcount slot', type: 'success' } }));
+        if (result) {
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: {
+              message: result.status === 'approved'
+                ? 'Target HC 已更新（无需审批，已自动生效）'
+                : '已提交审批：更新 Target HC',
+              type: 'success',
+            },
+          }));
+        } else {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '更新失败，请检查数据', type: 'error' } }));
+        }
       }
       posModal.value = false;
       posMarkRecruitAfterCreate.value = false;
+      posCreateRecruitReq.value = false;
       renderChart();
     }
 
     function removePos() {
-      if (!confirm('Submit removal of this headcount slot? Effective after approval.')) return;
+      if (!confirm('确认提交删除此 Target HC？审批通过后生效。')) return;
       const p = posForm.value;
       data.submitOrgChangeRequest({
         type: 'position_delete',
-        title: `Remove headcount slot "${p.name}"`,
+        title: `Remove Target HC "${p.name}"`,
         payload: { id: p.id },
       });
       posModal.value = false;
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: remove headcount slot', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已提交审批：删除 Target HC', type: 'success' } }));
     }
 
     function closeSlotModal() {
       slotModal.value = false;
       slotCtx.value = null;
+    }
+
+    function createRecruitFromSlot() {
+      const c = slotCtx.value;
+      if (!c) return;
+      data.setPositionRecruitTagged(c.deptId, c.positionId, true);
+      renderChart();
+      window.dispatchEvent(new CustomEvent('tm-toast', {
+        detail: { message: '已创建招聘需求（已标记为 Open，可在 Recruitment 模块查看）', type: 'success' },
+      }));
     }
 
     function toggleRecruitSlot() {
@@ -1136,7 +1235,8 @@
     return {
       data, auth, orgOwnerId, orgRequestsSorted, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq,
       chartRef, deptCountBarRef, deptModal, deptMode, deptForm,
-      posModal, posMode, posForm, posMarkRecruitAfterCreate, jobTradesList, jobLevelsList, tradesAvailableForCreate, positionTradeTaken,
+      posModal, posMode, posForm, posMarkRecruitAfterCreate, posCreateRecruitReq, jobTradesList, jobLevelsList, tradesAvailableForCreate, positionTradeTaken,
+      deptManagerOptions,
       slotModal, slotCtx, slotPosition, slotAssignees, slotVacant, slotRecruiting, slotRecruitPriority,
       recruitListRows, onRecruitPriorityChange, removeRecruitRow, onSlotRecruitPriorityChange,
       deptName, parentDeptName, empName, posName, statusLabel,
@@ -1145,7 +1245,7 @@
       onDeptDragStart, onDeptDragEnd, onDeptDragOver, onDeptDragLeave, onDeptDrop,
       onRootDragOver, onRootDragLeave, onDropAsRoot,
       openDept, saveDept, removeDept, openPos, savePos, removePos,
-      closeSlotModal, toggleRecruitSlot, openPosFromSlot,
+      closeSlotModal, toggleRecruitSlot, openPosFromSlot, createRecruitFromSlot,
     };
   },
 };
