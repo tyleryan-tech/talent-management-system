@@ -32,3 +32,17 @@ alwaysApply: true
 - **安全**：满足 **信息安全与网络安全** 的基本要求（如传输与存储加密、访问控制、最小权限、依赖与漏洞管理、日志与审计、合规的数据处理等），选型与实现不得明显违背常见基线。
 
 **示例**：选数据库或消息队列时写明在万级员工下的容量与扩展路径；错误处理区分「用户可见中文提示」与「运维侧详细日志/告警」。
+
+## 5. 文件上传与字段映射原则
+
+所有涉及文档上传导入数据的功能，统一遵守以下规则：
+
+- **自动字段识别**：默认上传文档第一行为字段名称。系统使用 `TM.fieldMapper`（`js/utils/fieldMapper.js`）对上传文件的列名与系统预定义字段进行模糊匹配（Dice 系数 + 子串包含 + 同义词库），自动推断映射关系。
+- **确认对话框**：当匹配置信度不全为"精确"时，弹出 `FieldMapDialog` 组件让用户确认或调整映射关系；如所有匹配均为精确匹配（≥0.95），可直接导入不弹窗。
+- **顺序无关**：上传文件的列顺序无需与系统显示顺序一致，系统按字段含义（而非位置）进行映射，导入后按系统原有顺序编排显示。
+- **同义词库维护**：每个上传入口须定义自己的 schema（含 `key`、`label`、`aliases`、`keywords`），涵盖中英文常见写法。新增字段时必须同步更新 schema 的 aliases/keywords。
+- **已应用模块**：
+  - **Recruitment Pipeline**（`Recruitment.js` → `PIPE_SCHEMA` + `uploadPipeline`）
+  - **Roster 花名册**（`Roster.js` → `ROSTER_SCHEMA` + `importExcel` / `appendImportExcel`）
+  - **Attendance 考勤**（`Attendance.js` → 已有智能时间序列列名检测，遵循相同自动识别原则）
+- **新增上传入口**：任何新模块若需文件导入，必须使用 `TM.fieldMapper.match(schema, headers)` + `FieldMapDialog` 组件，不得硬编码列位置。

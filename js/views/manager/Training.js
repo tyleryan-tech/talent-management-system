@@ -54,8 +54,8 @@
     const data = useDataStore();
     const me = computed(() => auth.currentUser?.employeeId);
     const subs = computed(() => data.employees.filter((e) => e.managerId === me.value));
-    const pickEmp = ref(subs.value[0]?.id);
-    const pickCourse = ref(data.trainings[0]?.id);
+    const pickEmp = ref(subs.value[0]?.id ?? null);
+    const pickCourse = ref(data.trainings[0]?.id ?? null);
 
     const rows = computed(() =>
       data.employeeTrainings.filter((t) => subs.value.some((s) => s.id === t.employeeId)));

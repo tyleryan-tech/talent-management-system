@@ -235,7 +235,7 @@
       <div class="toolbar card pad wrap">
         <button type="button" class="btn btn-primary" @click="openDept('create')">Add department</button>
         <button type="button" class="btn btn-secondary" @click="openPos('create')">Add Target HC</button>
-        <span class="muted">拖拽部门行可调整层级关系。所有结构变更需审批。</span>
+        <span class="muted">拖拽部门行可调整层级关系。HRBP / 产品线负责人操作自动生效；汇报经理操作需审批。</span>
       </div>
       <section class="card pad">
         <h3 class="section-title">Organization change approval</h3>
@@ -282,7 +282,7 @@
           <i class="fa-solid fa-layer-group"></i> Drop here: set as top-level (no parent)
         </div>
         <table class="data-table compact dept-drag-table">
-          <thead><tr><th class="col-drag"></th><th>Department</th><th>Parent</th><th>Head</th><th>Target HC</th><th>Current HC</th><th></th></tr></thead>
+          <thead><tr><th class="col-drag"></th><th>Department</th><th>Parent</th><th>Head</th><th>HC Plan</th><th>Target HC</th><th>Current HC</th><th>Fulfillment</th><th></th></tr></thead>
           <tbody>
             <tr
               v-for="row in deptRowsFlat"
@@ -303,10 +303,19 @@
               </td>
               <td>{{ parentDeptName(row.dept.parentId) }}</td>
               <td>{{ empName(row.dept.managerId) }}</td>
-              <td>{{ deptPositionCount(row.dept.id) }}</td>
+              <td class="hc-plan-cell">
+                <input type="number" min="0" class="hc-plan-input"
+                  :value="row.dept.hcPlan || 0"
+                  @change="onHcPlanChange(row.dept.id, $event)" />
+              </td>
+              <td :class="{ 'text-warn': deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) && (row.dept.hcPlan || 0) > 0 }">{{ deptPositionCount(row.dept.id) }}</td>
               <td>{{ deptOnDutyCount(row.dept.id) }}</td>
+              <td>{{ fulfillmentRate(row.dept.id) }}</td>
               <td class="dept-row-actions">
-                <button type="button" class="btn-link" @click.stop="openPos('create', null, row.dept.id)">New HC slot</button>
+                <button type="button" class="btn-link"
+                  :disabled="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0)"
+                  :title="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) ? 'Target HC 已达 HC Plan 上限' : ''"
+                  @click.stop="openPos('create', null, row.dept.id)">New HC slot</button>
               </td>
             </tr>
           </tbody>
@@ -381,30 +390,25 @@
               </select>
             </label>
             <label class="field"><span>Job function</span>
-              <select v-if="posMode === 'create'" v-model="posForm.name" required>
-                <option
-                  v-for="t in jobTradesList"
-                  :key="t"
-                  :value="t"
-                  :disabled="positionTradeTaken(t)"
-                >{{ t }}{{ positionTradeTaken(t) ? ' (taken)' : '' }}</option>
-              </select>
-              <select v-else v-model="posForm.name" required>
+              <select v-model="posForm.name" required>
                 <option v-for="t in jobTradesList" :key="t" :value="t">{{ t }}</option>
               </select>
             </label>
-            <p v-if="posMode === 'create' && !tradesAvailableForCreate.length" class="muted small" style="grid-column:1/-1">All seven job functions already have slots in this department; edit or remove an existing slot first.</p>
             <label class="field"><span>Level</span>
               <select v-model="posForm.level" required>
                 <option v-for="lv in jobLevelsList" :key="lv" :value="lv">{{ lv }}</option>
               </select>
             </label>
             <label class="field"><span>Reporting Manager</span>
-              <select v-model.number="posForm.reportingManagerId">
-                <option :value="null">— None —</option>
+              <select v-model="posForm.reportingManagerId">
+                <option value="">— None —</option>
                 <option v-for="mgr in deptManagerOptions" :key="mgr.id" :value="mgr.id">{{ mgr.name }}</option>
               </select>
             </label>
+            <label v-if="posMode === 'create'" class="field"><span>Quantity</span>
+              <input type="number" min="1" max="50" v-model.number="posQuantity" required />
+            </label>
+            <p v-if="posMode === 'create' && posHcExceedMsg" class="small" style="grid-column:1/-1;color:#dc2626;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca">⚠ {{ posHcExceedMsg }}</p>
             <label v-if="posMode === 'create'" class="field full pos-create-options">
               <span class="checkbox-inline">
                 <input type="checkbox" v-model="posMarkRecruitAfterCreate" />
@@ -420,7 +424,7 @@
             <div class="modal-actions">
               <button v-if="posMode === 'edit'" type="button" class="btn btn-ghost danger" @click="removePos">Delete</button>
               <button type="button" class="btn btn-ghost" @click="posModal = false">Cancel</button>
-              <button type="submit" class="btn btn-primary" :disabled="posMode === 'create' && !tradesAvailableForCreate.length">Save</button>
+              <button type="submit" class="btn btn-primary" :disabled="posMode === 'create' && !!posHcExceedMsg">Save</button>
             </div>
           </form>
         </div>
@@ -470,6 +474,11 @@
     let deptBarInst;
     let echartsLib;
 
+    const submitter = computed(() => ({
+      role: auth.currentUser?.role || '',
+      employeeId: auth.currentUser?.employeeId ?? null,
+    }));
+
     const deptModal = ref(false);
     const deptMode = ref('create');
     const deptForm = ref({ name: '', parentId: null, managerId: null, id: null });
@@ -479,6 +488,22 @@
     const posForm = ref({ name: '', level: 'EE', departmentId: 1, id: null, reportingManagerId: null });
     const posMarkRecruitAfterCreate = ref(false);
     const posCreateRecruitReq = ref(false);
+    const posQuantity = ref(1);
+
+    const posHcExceedMsg = computed(() => {
+      if (posMode.value !== 'create') return '';
+      const depId = Number(posForm.value?.departmentId);
+      if (Number.isNaN(depId)) return '';
+      const dept = data.departments.find((d) => d.id === depId);
+      const plan = dept?.hcPlan || 0;
+      if (plan <= 0) return '';
+      const currentTarget = data.positions.filter((p) => p.departmentId === depId).length;
+      const qty = posQuantity.value || 1;
+      if (currentTarget + qty > plan) {
+        return `创建后 Target HC (${currentTarget + qty}) 将超过 HC Plan (${plan})，请调整数量或增加 HC Plan。`;
+      }
+      return '';
+    });
 
     /** Managers in the currently selected department (for reporting manager dropdown) */
     const deptManagerOptions = computed(() => {
@@ -501,29 +526,7 @@
     const jobTradesList = computed(() => window.TM.JOB_TRADES || ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data']);
     const jobLevelsList = computed(() => window.TM.JOB_LEVELS || ['E', 'SE', 'EE', 'SEE', 'AM', 'M', 'PE', 'SM']);
 
-    /** 与 persist 中 departmentId 可能为数字或字符串的情况兼容，避免误判「已有编制」而隐藏可选工种 */
-    function tradeNamesTakenInDept(deptId) {
-      const depId = Number(deptId);
-      if (Number.isNaN(depId)) return new Set();
-      return new Set(
-        data.positions
-          .filter((p) => Number(p.departmentId) === depId)
-          .map((p) => String(p.name || '').trim()),
-      );
-    }
-
-    function positionTradeTaken(trade) {
-      const taken = tradeNamesTakenInDept(posForm.value?.departmentId);
-      return taken.has(String(trade || '').trim());
-    }
-
-    const tradesAvailableForCreate = computed(() => {
-      const depId = Number(posForm.value?.departmentId);
-      const list = jobTradesList.value;
-      if (Number.isNaN(depId)) return [...list];
-      const taken = tradeNamesTakenInDept(depId);
-      return list.filter((t) => !taken.has(t));
-    });
+    
 
     const slotModal = ref(false);
     const slotCtx = ref(null);
@@ -651,13 +654,14 @@
       const dragged = data.departments.find((d) => d.id === fromId);
       const oldP = dragged ? dragged.parentId : null;
       if (oldP === targetDept.id) return;
-      data.submitOrgChangeRequest({
+      const dResult = data.submitOrgChangeRequest({
         type: 'dept_update',
         title: `Reporting line: "${dragged?.name || fromId}" → parent "${targetDept.name}"`,
         payload: { id: fromId, patch: { parentId: targetDept.id }, prevParentId: oldP },
+        submitter: submitter.value,
       });
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: department reporting line', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dResult?.status === 'approved' ? '部门层级已调整（已自动生效）' : '已提交审批：调整部门层级', type: 'success' } }));
     }
 
     function onRootDragOver(e) {
@@ -677,13 +681,14 @@
       const dragged = data.departments.find((d) => d.id === fromId);
       const oldP = dragged ? dragged.parentId : null;
       if (oldP == null) return;
-      data.submitOrgChangeRequest({
+      const rResult = data.submitOrgChangeRequest({
         type: 'dept_update',
         title: `Reporting line: "${dragged?.name || fromId}" → top-level`,
         payload: { id: fromId, patch: { parentId: null }, prevParentId: oldP },
+        submitter: submitter.value,
       });
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: set as top-level department', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: rResult?.status === 'approved' ? '已设为顶级部门（已自动生效）' : '已提交审批：设为顶级部门', type: 'success' } }));
     }
 
     const slotPosition = computed(() => {
@@ -755,6 +760,17 @@
 
     function deptOnDutyCount(deptId) {
       return data.employees.filter((e) => e.departmentId === deptId && e.status !== 'leave').length;
+    }
+
+    function fulfillmentRate(deptId) {
+      const target = deptPositionCount(deptId);
+      if (target === 0) return '—';
+      const current = deptOnDutyCount(deptId);
+      return Math.round((current / target) * 100) + '%';
+    }
+
+    function onHcPlanChange(deptId, ev) {
+      data.updateDeptHcPlan(deptId, ev.target.value);
     }
 
     function deptName(id) {
@@ -1004,17 +1020,7 @@
       () => { if (chartInst) renderChart(); },
     );
 
-    watch(
-      () => [posModal.value, posMode.value, posForm.value?.departmentId, data.positions.length],
-      () => {
-        if (!posModal.value || posMode.value !== 'create') return;
-        const avail = tradesAvailableForCreate.value;
-        if (!avail.length) return;
-        if (!avail.includes(posForm.value.name)) {
-          posForm.value.name = avail[0];
-        }
-      },
-    );
+    
 
     onUnmounted(() => {
       chartInst?.dispose();
@@ -1033,7 +1039,7 @@
 
     function saveDept() {
       if (deptMode.value === 'create') {
-        data.submitOrgChangeRequest({
+        const dcResult = data.submitOrgChangeRequest({
           type: 'dept_create',
           title: `Add department: ${deptForm.value.name}`,
           payload: {
@@ -1041,8 +1047,13 @@
             parentId: deptForm.value.parentId,
             managerId: deptForm.value.managerId,
           },
+          submitter: submitter.value,
         });
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: new department', type: 'success' } }));
+        if (dcResult) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dcResult.status === 'approved' ? '部门已创建（已自动生效）' : '已提交审批：新增部门', type: 'success' } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '部门创建失败', type: 'error' } }));
+        }
       } else {
         const orig = data.departments.find((d) => d.id === deptForm.value.id);
         if (!orig) return;
@@ -1054,12 +1065,17 @@
           deptModal.value = false;
           return;
         }
-        data.submitOrgChangeRequest({
+        const duResult = data.submitOrgChangeRequest({
           type: 'dept_update',
           title: `Update department "${orig.name}"`,
           payload: { id: orig.id, patch, prevParentId: orig.parentId },
+          submitter: submitter.value,
         });
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: department update', type: 'success' } }));
+        if (duResult) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: duResult.status === 'approved' ? '部门已更新（已自动生效）' : '已提交审批：更新部门', type: 'success' } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '部门更新失败', type: 'error' } }));
+        }
       }
       deptModal.value = false;
       renderChart();
@@ -1068,30 +1084,34 @@
     function removeDept() {
       if (!confirm('Submit removal of this department? Effective after approval.')) return;
       const d = deptForm.value;
-      data.submitOrgChangeRequest({
+      const ddResult = data.submitOrgChangeRequest({
         type: 'dept_delete',
         title: `Remove department "${d.name}"`,
         payload: { id: d.id },
+        submitter: submitter.value,
       });
       deptModal.value = false;
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Submitted for approval: remove department', type: 'success' } }));
+      if (ddResult) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: ddResult.status === 'approved' ? '部门已删除（已自动生效）' : '已提交审批：删除部门', type: 'success' } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '删除部门失败', type: 'error' } }));
+      }
     }
 
     function openPos(mode, row, presetDeptId) {
       posMode.value = mode;
       posMarkRecruitAfterCreate.value = false;
       posCreateRecruitReq.value = false;
+      posQuantity.value = 1;
       const list = window.TM.JOB_TRADES || ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data'];
       if (mode === 'create') {
         const did = presetDeptId != null && !Number.isNaN(Number(presetDeptId))
           ? Number(presetDeptId)
           : Number(data.departments[0]?.id);
-        const taken = tradeNamesTakenInDept(did);
-        const first = list.find((t) => !taken.has(t)) || list[0];
-        posForm.value = { name: first, level: 'EE', departmentId: did, reportingManagerId: null };
+        posForm.value = { name: list[0], level: 'EE', departmentId: did, reportingManagerId: '' };
       } else {
-        posForm.value = { ...row, reportingManagerId: row?.reportingManagerId || null };
+        posForm.value = { ...row, reportingManagerId: row?.reportingManagerId || '' };
       }
       posModal.value = true;
     }
@@ -1100,33 +1120,38 @@
       if (posMode.value === 'create') {
         const { name, level, departmentId, reportingManagerId } = posForm.value;
         const depId = Number(departmentId);
-        const taken = tradeNamesTakenInDept(depId);
-        if (taken.has(String(name || '').trim())) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '该部门已存在该工种的 Target HC', type: 'error' } }));
+        const qty = Math.max(1, posQuantity.value || 1);
+        if (posHcExceedMsg.value) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: posHcExceedMsg.value, type: 'error' } }));
           return;
         }
-        const result = data.submitOrgChangeRequest({
-          type: 'position_create',
-          title: `Add Target HC: ${name} (dept ${deptName(depId)})`,
-          payload: {
-            departmentId: depId,
-            name,
-            level,
-            reportingManagerId: reportingManagerId || null,
-            markRecruitAfter: !!posMarkRecruitAfterCreate.value,
-          },
-        });
-        if (result) {
-          if (posCreateRecruitReq.value && result.status === 'approved') {
-            data.setPositionRecruitTagged(depId, result.payload?.createdId || 0, true);
-          }
-          window.dispatchEvent(new CustomEvent('tm-toast', {
-            detail: {
-              message: result.status === 'approved'
-                ? 'Target HC 已创建（无需审批，已自动生效）'
-                : '已提交审批：新增 Target HC',
-              type: 'success',
+        let created = 0;
+        let lastResult = null;
+        for (let q = 0; q < qty; q++) {
+          const result = data.submitOrgChangeRequest({
+            type: 'position_create',
+            title: `Add Target HC: ${name} (dept ${deptName(depId)})` + (qty > 1 ? ` [${q + 1}/${qty}]` : ''),
+            payload: {
+              departmentId: depId,
+              name,
+              level,
+              reportingManagerId: reportingManagerId ? Number(reportingManagerId) : null,
+              markRecruitAfter: !!posMarkRecruitAfterCreate.value,
             },
+            submitter: submitter.value,
+          });
+          if (result) {
+            created++;
+            lastResult = result;
+            if (posCreateRecruitReq.value && result.status === 'approved') {
+              data.setPositionRecruitTagged(depId, result.payload?.createdId || 0, true);
+            }
+          }
+        }
+        if (created > 0) {
+          const statusMsg = lastResult?.status === 'approved' ? '已自动生效' : '已提交审批';
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: { message: `已创建 ${created} 个 Target HC（${statusMsg}）`, type: 'success' },
           }));
         } else {
           window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '创建失败，请检查数据', type: 'error' } }));
@@ -1141,7 +1166,8 @@
         if (String(posForm.value.name).trim() !== String(orig.name).trim()) patch.name = posForm.value.name;
         if (String(posForm.value.level).trim() !== String(orig.level || '').trim()) patch.level = posForm.value.level;
         if (Number(posForm.value.departmentId) !== Number(orig.departmentId)) patch.departmentId = Number(posForm.value.departmentId);
-        const newMgr = posForm.value.reportingManagerId || null;
+        const rawMgr = posForm.value.reportingManagerId;
+        const newMgr = rawMgr ? Number(rawMgr) : null;
         const oldMgr = orig.reportingManagerId || null;
         if (newMgr !== oldMgr) patch.reportingManagerId = newMgr;
         if (Object.keys(patch).length === 0) {
@@ -1153,6 +1179,7 @@
           type: 'position_update',
           title: `Update Target HC "${orig.name}"`,
           payload: { id: orig.id, patch },
+          submitter: submitter.value,
         });
         if (result) {
           window.dispatchEvent(new CustomEvent('tm-toast', {
@@ -1174,16 +1201,21 @@
     }
 
     function removePos() {
-      if (!confirm('确认提交删除此 Target HC？审批通过后生效。')) return;
+      if (!confirm('确认删除此 Target HC？')) return;
       const p = posForm.value;
-      data.submitOrgChangeRequest({
+      const dpResult = data.submitOrgChangeRequest({
         type: 'position_delete',
         title: `Remove Target HC "${p.name}"`,
         payload: { id: p.id },
+        submitter: submitter.value,
       });
       posModal.value = false;
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已提交审批：删除 Target HC', type: 'success' } }));
+      if (dpResult) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dpResult.status === 'approved' ? 'Target HC 已删除（已自动生效）' : '已提交审批：删除 Target HC', type: 'success' } }));
+      } else {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '删除 Target HC 失败', type: 'error' } }));
+      }
     }
 
     function closeSlotModal() {
@@ -1235,8 +1267,8 @@
     return {
       data, auth, orgOwnerId, orgRequestsSorted, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq,
       chartRef, deptCountBarRef, deptModal, deptMode, deptForm,
-      posModal, posMode, posForm, posMarkRecruitAfterCreate, posCreateRecruitReq, jobTradesList, jobLevelsList, tradesAvailableForCreate, positionTradeTaken,
-      deptManagerOptions,
+      posModal, posMode, posForm, posMarkRecruitAfterCreate, posCreateRecruitReq, posQuantity, posHcExceedMsg, jobTradesList, jobLevelsList,
+      deptManagerOptions, fulfillmentRate, onHcPlanChange,
       slotModal, slotCtx, slotPosition, slotAssignees, slotVacant, slotRecruiting, slotRecruitPriority,
       recruitListRows, onRecruitPriorityChange, removeRecruitRow, onSlotRecruitPriorityChange,
       deptName, parentDeptName, empName, posName, statusLabel,

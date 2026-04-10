@@ -89,7 +89,7 @@
               </select>
             </label>
             <label class="field"><span>Prior-cycle avg hours (h/day)</span>
-              <input v-model.number="rmForm.prevCycleAvgHours" type="number" step="0.1" min="0" max="24" placeholder="Optional" />
+              <input :value="rmForm.prevCycleAvgHours" @input="rmForm.prevCycleAvgHours = $event.target.value === '' ? null : Number($event.target.value)" type="number" step="0.1" min="0" max="24" placeholder="Optional" />
             </label>
             <label class="field full"><span>Comments</span><textarea v-model="rmForm.comments" rows="2"></textarea></label>
             <label class="field full"><span>Development suggestions</span><textarea v-model="rmForm.devAdvice" rows="2"></textarea></label>

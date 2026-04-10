@@ -14,7 +14,8 @@
     'employees', 'departments', 'positions', 'leaveRequests', 'performanceReviews',
     'trainings', 'employeeTrainings', 'users', 'attendanceRules', 'attendanceRecords',
     'punchRecords', 'kpiLibrary', 'performanceCycles', 'talentMatrix', 'successionPlans',
-    'notifications', 'positionRecruitTags', 'recruitmentCandidates', 'recruitmentPositionMetrics', '_seedVersion',
+    'notifications', 'positionRecruitTags', 'recruitmentCandidates', 'recruitmentPositionMetrics',
+    'recruitmentPipeline', 'interviewerPool', '_seedVersion',
   ];
 
   w.TM.lineStorageKey = function lineStorageKey(lineId, baseKey) {

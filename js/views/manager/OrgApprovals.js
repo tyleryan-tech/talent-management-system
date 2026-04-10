@@ -53,9 +53,9 @@
           dept_create: 'Add department',
           dept_delete: 'Remove department',
           dept_update: 'Department change',
-          position_create: 'Add headcount slot',
-          position_delete: 'Remove headcount slot',
-          position_update: 'Update headcount slot',
+          position_create: 'Add Target HC',
+          position_delete: 'Remove Target HC',
+          position_update: 'Update Target HC',
         }[t] || t;
       }
       function chainNames(ids) {

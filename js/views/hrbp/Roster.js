@@ -193,10 +193,45 @@ function perfStatusEn(s) {
   return m[s] || String(s || '—');
 }
 
+  /* ── Roster field-mapper schema ── */
+  const ROSTER_SCHEMA = [
+    { key: 'staffId', label: 'Staff ID', aliases: ['工号','Staff ID','Employee ID','员工编号','ID'], keywords: ['staff','id','工号'], required: false },
+    { key: 'displayName', label: 'Display Name', aliases: ['姓名','Display Name','Name','员工姓名','名字'], keywords: ['name','姓名'], required: true },
+    { key: 'team', label: 'Team', aliases: ['部门','Team','Department','团队'], keywords: ['team','dept','部门'] },
+    { key: 'teamPath', label: 'Team Path', aliases: ['团队路径','Team Path','Org Path'], keywords: ['path','路径'] },
+    { key: 'jobFunction', label: 'Job Function', aliases: ['工种','岗位','Job Function','Position','职位'], keywords: ['job','function','岗位','工种'] },
+    { key: 'rank', label: 'Rank', aliases: ['职级','Rank','Level','等级'], keywords: ['rank','level','职级'] },
+    { key: 'title', label: 'Title/Org Role', aliases: ['组织角色','Title','Org Role','IC','PIC','RM'], keywords: ['title','role','角色'] },
+    { key: 'age', label: 'Age', aliases: ['年龄','Age'], keywords: ['age','年龄'] },
+    { key: 'gender', label: 'Gender', aliases: ['性别','Gender','Sex'], keywords: ['gender','性别'] },
+    { key: 'birthday', label: 'Birthday', aliases: ['生日','Birthday','出生日期','Date of Birth','DOB'], keywords: ['birthday','生日','出生'] },
+    { key: 'payPosition', label: 'Salary Band', aliases: ['薪资段位','salaryBand','Pay Position','Salary Band'], keywords: ['salary','pay','薪资'] },
+    { key: 'potential', label: 'Potential', aliases: ['潜力','Potential'], keywords: ['potential','潜力'] },
+    { key: 'managementPlan', label: 'Management Plan', aliases: ['管理计划','Management Plan'], keywords: ['management','plan','管理'] },
+    { key: 'reportingManager', label: 'Reporting Manager', aliases: ['汇报经理工号','Reporting Manager Staff ID','汇报经理','Manager ID'], keywords: ['reporting','manager','汇报','经理'] },
+    { key: 'hireDate', label: 'Hire Date', aliases: ['入职日期','Hire Date','Join Date','入职时间'], keywords: ['hire','入职'] },
+    { key: 'careerStartDate', label: 'Career Start', aliases: ['参加工作日期','Career Start Date','工作开始日期'], keywords: ['career','start','工作日期'] },
+    { key: 'rankStartDate', label: 'Rank Start', aliases: ['现任职级起始日','Rank Start Date','职级起始'], keywords: ['rank start','职级起始'] },
+    { key: 'school', label: 'School', aliases: ['毕业院校','School','University','学校'], keywords: ['school','院校','university'] },
+    { key: 'status', label: 'Status', aliases: ['状态','Status','Employment Status'], keywords: ['status','状态'] },
+    { key: 'statusLabel', label: 'Status Label', aliases: ['状态说明','Status Label','状态备注'], keywords: ['status label','说明'] },
+    { key: 'mobile', label: 'Mobile', aliases: ['手机','Mobile','Phone','电话'], keywords: ['mobile','phone','手机'] },
+    { key: 'email', label: 'Email', aliases: ['邮箱','Email','E-mail','电子邮件'], keywords: ['email','mail','邮箱'] },
+  ];
+
   window.TM.HrbpRoster = {
   name: 'HrbpRoster',
+  components: { FieldMapDialog: window.TM.FieldMapDialog },
   template: `
     <div class="page-stack roster-page-stack">
+      <FieldMapDialog
+        :visible="rfmapVisible"
+        :mapping="rfmapMapping"
+        :fileHeaders="rfmapHeaders"
+        :title="rfmapTitle"
+        @confirm="rfmapOnConfirm"
+        @cancel="rfmapVisible = false"
+      />
       <div class="card pad roster-toolbar-card">
         <div class="toolbar roster-toolbar-actions">
           <input v-model.trim="q" type="search" class="input search" placeholder="Search name, email, mobile…" />
@@ -1269,7 +1304,27 @@ function perfStatusEn(s) {
       }));
     }
 
-    function importExcel(ev) {
+    /* ── Field Map Dialog state for Roster ── */
+    const rfmapVisible = ref(false);
+    const rfmapMapping = ref([]);
+    const rfmapHeaders = ref([]);
+    const rfmapTitle = ref('花名册字段映射确认');
+    let rfmapPendingJson = null;
+    let rfmapPendingMode = null;
+
+    function rfmapOnConfirm(confirmedMapping) {
+      rfmapVisible.value = false;
+      const headerToField = {};
+      confirmedMapping.forEach((m) => { if (m.header) headerToField[m.header] = m.fieldKey; });
+      const fieldMap = {};
+      Object.entries(headerToField).forEach(([h, fk]) => { fieldMap[fk] = h; });
+      if (rfmapPendingMode === 'replace') commitRosterImport(rfmapPendingJson, false, fieldMap);
+      else if (rfmapPendingMode === 'append') commitRosterImport(rfmapPendingJson, true, fieldMap);
+      rfmapPendingJson = null;
+      rfmapPendingMode = null;
+    }
+
+    function rosterUploadCommon(ev, mode) {
       const file = ev.target.files?.[0];
       ev.target.value = '';
       if (!file) return;
@@ -1280,58 +1335,53 @@ function perfStatusEn(s) {
           const wb = XLSX.read(reader.result, { type: 'array', cellDates: true });
           const sn = wb.SheetNames[0];
           if (!sn) throw new Error('Workbook is empty');
-          const sheet = wb.Sheets[sn];
-          const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          const json = XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' });
           if (!json.length) throw new Error('No data rows under header');
-          const fieldMap = buildImportFieldMap(json);
-          const { list, matrixPatches } = parseSheetJsonToList(json, false, fieldMap);
-          if (!list.length) throw new Error('No valid rows (Display Name is required)');
-          data.employees = list;
-          data.syncEmployeeLinkedDataFromRoster();
-          matrixPatches.forEach(({ id, pot }) => {
-            const perf = data.talentMatrix.find((x) => Number(x.employeeId) === Number(id))?.performance || 'B';
-            data.upsertTalentCell(id, perf, pot, { skipPersist: true });
-          });
-          data.persistAll();
-          runAfterRosterImport(list.length);
+          const headers = Object.keys(json[0]);
+          const mapping = window.TM.fieldMapper.match(ROSTER_SCHEMA, headers);
+          const allExact = mapping.every((m) => !m.header || m.confidence === 'exact');
+          if (allExact && mapping.filter((m) => m.header).length >= 3) {
+            const fieldMap = {};
+            mapping.forEach((m) => { if (m.header) fieldMap[m.fieldKey] = m.header; });
+            commitRosterImport(json, mode === 'append', fieldMap);
+          } else {
+            rfmapPendingJson = json;
+            rfmapPendingMode = mode;
+            rfmapHeaders.value = headers;
+            rfmapMapping.value = mapping;
+            rfmapTitle.value = mode === 'append' ? '花名册追加 — 字段映射确认' : '花名册导入 — 字段映射确认';
+            rfmapVisible.value = true;
+          }
         } catch (err) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Import failed: ' + err.message, type: 'error' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: (mode === 'append' ? 'Append' : 'Import') + ' failed: ' + err.message, type: 'error' } }));
         }
       };
       reader.readAsArrayBuffer(file);
     }
 
-    function appendImportExcel(ev) {
-      if (!auth.isHrbp) return;
-      const file = ev.target.files?.[0];
-      ev.target.value = '';
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const XLSX = ensureXLSX();
-          const wb = XLSX.read(reader.result, { type: 'array', cellDates: true });
-          const sn = wb.SheetNames[0];
-          if (!sn) throw new Error('Workbook is empty');
-          const sheet = wb.Sheets[sn];
-          const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-          if (!json.length) throw new Error('No data rows under header');
-          const fieldMap = buildImportFieldMap(json);
-          const { list, matrixPatches } = parseSheetJsonToList(json, true, fieldMap);
-          if (!list.length) throw new Error('No valid rows (Display Name is required)');
+    function commitRosterImport(json, append, fieldMap) {
+      try {
+        const { list, matrixPatches } = parseSheetJsonToList(json, append, fieldMap);
+        if (!list.length) throw new Error('No valid rows (Display Name is required)');
+        if (append) {
           data.addEmployeesBatch(list);
-          matrixPatches.forEach(({ id, pot }) => {
-            const perf = data.talentMatrix.find((x) => Number(x.employeeId) === Number(id))?.performance || 'B';
-            data.upsertTalentCell(id, perf, pot, { skipPersist: true });
-          });
-          if (matrixPatches.length) data.persistAll();
-          runAfterRosterImport(list.length);
-        } catch (err) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Append failed: ' + err.message, type: 'error' } }));
+        } else {
+          data.employees = list;
+          data.syncEmployeeLinkedDataFromRoster();
         }
-      };
-      reader.readAsArrayBuffer(file);
+        matrixPatches.forEach(({ id, pot }) => {
+          const perf = data.talentMatrix.find((x) => Number(x.employeeId) === Number(id))?.performance || 'B';
+          data.upsertTalentCell(id, perf, pot, { skipPersist: true });
+        });
+        data.persistAll();
+        runAfterRosterImport(list.length);
+      } catch (err) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Import failed: ' + err.message, type: 'error' } }));
+      }
     }
+
+    function importExcel(ev) { rosterUploadCommon(ev, 'replace'); }
+    function appendImportExcel(ev) { if (!auth.isHrbp) return; rosterUploadCommon(ev, 'append'); }
 
     return {
       auth,
@@ -1349,6 +1399,7 @@ function perfStatusEn(s) {
       fieldEditorOpen, fieldEditorRows, layoutPreview,
       openRosterFieldEditor, saveRosterFieldEditor, moveFieldRow, resetRosterFieldsDefault, fieldDefLabel,
       onUploadLayoutHeaders, applyLayoutFromPreview,
+      rfmapVisible, rfmapMapping, rfmapHeaders, rfmapTitle, rfmapOnConfirm,
     };
   },
 };

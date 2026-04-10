@@ -40,7 +40,7 @@ function reviewGradeForDisplay(r) {
       </div>
       <section class="card pad">
         <h3 class="section-title">Talent nine-box</h3>
-        <p class="muted">X-axis: performance (C left → A right). Y-axis: potential (high / medium / low). Names stay in sync with the <strong>roster</strong>: active employees have a cell (default B/M); terminated are removed. Cells refresh after product line changes, saves, or roster import.</p>
+        <p class="muted">X-axis: performance (C left → A right). Y-axis: potential (high / medium / low). Names stay in sync with the <strong>roster</strong>: active employees have a cell (default B/M); Leaving employees are excluded. Cells refresh after product line changes, saves, or roster import.</p>
         <div class="nine-grid">
           <div class="nine-corner muted small">Potential \\ Performance</div>
           <div v-for="p in perfOptsGridOrder" :key="'h'+p" class="nine-col-h">{{ p }}</div>
@@ -110,7 +110,7 @@ function reviewGradeForDisplay(r) {
       <section class="card pad">
         <h3 class="section-title">Succession</h3>
         <table class="data-table">
-          <thead><tr><th>Key position slot</th><th>Successors</th><th>Note</th><th></th></tr></thead>
+          <thead><tr><th>Key position (Target HC)</th><th>Successors</th><th>Note</th><th></th></tr></thead>
           <tbody>
             <tr v-for="s in successionPlansScoped" :key="s.id">
               <td>{{ posName(s.positionId) }}</td>
@@ -176,7 +176,7 @@ function reviewGradeForDisplay(r) {
         <div class="modal card wide">
           <h3>{{ succForm.id ? 'Edit succession plan' : 'Add succession plan' }}</h3>
           <form class="form-grid" @submit.prevent="saveSucc">
-            <label class="field"><span>Key position slot</span>
+            <label class="field"><span>Key position (Target HC)</span>
               <select v-model.number="succForm.positionId" required>
                 <option v-for="p in positionsForSuccModal" :key="p.id" :value="p.id">{{ succPosOption(p) }}</option>
               </select>
@@ -255,6 +255,7 @@ function reviewGradeForDisplay(r) {
 
     function cell(perf, pot) {
       return data.employees.filter((e) => {
+        if (e.status === 'leave') return false;
         if (!employeeInScope(e)) return false;
         const m = matrixRow(e.id);
         if (!m) return false;
@@ -280,7 +281,7 @@ function reviewGradeForDisplay(r) {
         .filter((m) => {
           if (!['A', 'B'].includes(m.performance) || m.potential !== 'H') return false;
           const e = data.employees.find((x) => x.id === m.employeeId);
-          return e && employeeInScope(e);
+          return e && e.status !== 'leave' && employeeInScope(e);
         })
         .map((m) => {
           const e = data.employees.find((x) => x.id === m.employeeId);

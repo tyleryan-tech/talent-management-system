@@ -324,59 +324,71 @@ function seedAllData(lineId) {
     { id: nextNotifId(), employeeId: 1006, title: 'Training recommendation', message: 'Your manager recommended “Vue 3 in Practice”.', read: false, createdAt: '2025-03-18' },
   ];
 
+  /* ── Recruitment: open positions (positionRecruitTags) ── */
   const positionRecruitTags = {};
   const recruitmentPositionMetrics = {};
   const recruitmentCandidates = [];
-  let recruitTagged = 0;
-  positions.forEach((p) => {
-    if (recruitTagged >= 2) return;
-    const taken = employees.some(
-      (e) => e.positionId === p.id && e.departmentId === p.departmentId && e.status !== 'leave',
-    );
+  const openSlots = [
+    { deptId: 1, posName: 'Frontend',  priority: 'high' },
+    { deptId: 1, posName: 'Backend',   priority: 'high' },
+    { deptId: 1, posName: 'Algorithm', priority: 'medium' },
+    { deptId: 1, posName: 'SDET',      priority: 'low' },
+    { deptId: 2, posName: 'Frontend',  priority: 'high' },
+    { deptId: 2, posName: 'Big Data',  priority: 'medium' },
+    { deptId: 3, posName: 'Frontend',  priority: 'medium' },
+    { deptId: 3, posName: 'Backend',   priority: 'low' },
+    { deptId: 4, posName: 'Mobile',    priority: 'medium' },
+  ];
+  openSlots.forEach(({ deptId, posName, priority }) => {
+    const p = positions.find((x) => x.departmentId === deptId && x.name === posName);
+    if (!p) return;
+    const taken = employees.some((e) => e.positionId === p.id && e.departmentId === p.departmentId && e.status !== 'leave');
     if (taken) return;
-    const key = `${p.departmentId}-${p.id}`;
-    recruitTagged += 1;
-    positionRecruitTags[key] = { priority: recruitTagged === 1 ? 'high' : 'medium' };
-    recruitmentPositionMetrics[key] = {
-      cnPassedTotal: 8,
-      cvPending: 3,
-      offerTalking: 1,
-      pendingOnboard: 1,
-      onboarded: 0,
-      remainingSlots: 2,
-      positionOpenDate: '2025-01-02',
-      positionCloseDate: '',
-    };
-    recruitmentCandidates.push(
-      {
-        id: `RC-DEMO-${recruitTagged}-a`,
-        name: 'Sample Candidate A',
-        departmentId: p.departmentId,
-        positionId: p.id,
-        resumePassDate: '2025-01-12',
-        offerEndDate: '2025-02-18',
-        overallScore: 4,
-        resumeScreenPass: true,
-        round1Pass: true,
-        round2Pass: true,
-        roundFinalPass: true,
-        offerRejected: false,
-      },
-      {
-        id: `RC-DEMO-${recruitTagged}-b`,
-        name: 'Sample Candidate B',
-        departmentId: p.departmentId,
-        positionId: p.id,
-        resumePassDate: '2025-01-15',
-        offerEndDate: '',
-        overallScore: 3,
-        resumeScreenPass: true,
-        round1Pass: true,
-        round2Pass: false,
-        roundFinalPass: false,
-        offerRejected: false,
-      },
-    );
+    positionRecruitTags[`${deptId}-${p.id}`] = { priority };
+  });
+
+  /* ── Pipeline: 30 mock candidates ── */
+  const recruitmentPipeline = [
+    { id:'P001', recruitDate:'2026-01-05', name:'张明华', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'2026-03-01', comments:'', yoe:'5' },
+    { id:'P002', recruitDate:'2026-01-08', name:'李思雨', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'fail', interviewFinalBy:'陈静', score:'3', offering:'', onboardDate:'', comments:'终面表现一般', yoe:'0' },
+    { id:'P003', recruitDate:'2026-01-10', name:'王浩然', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'5', offering:'accepted', onboardDate:'2026-02-20', comments:'优秀候选人', yoe:'8' },
+    { id:'P004', recruitDate:'2026-01-12', name:'赵晓琳', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'fail', interview2By:'张伟', interviewFinal:'', interviewFinalBy:'', score:'3', offering:'', onboardDate:'', comments:'', yoe:'4' },
+    { id:'P005', recruitDate:'2026-01-15', name:'刘佳怡', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'王强', score:'4', offering:'pending', onboardDate:'', comments:'等待offer审批', yoe:'0' },
+    { id:'P006', recruitDate:'2026-01-18', name:'陈宇飞', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pending', interview1By:'陈静', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'一面待安排', yoe:'6' },
+    { id:'P007', recruitDate:'2026-01-20', name:'孙婷婷', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'declined', onboardDate:'', comments:'候选人拒绝offer', yoe:'3' },
+    { id:'P008', recruitDate:'2026-01-22', name:'周文博', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pending', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'', yoe:'3' },
+    { id:'P009', recruitDate:'2026-01-25', name:'吴美琪', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'0' },
+    { id:'P010', recruitDate:'2026-02-01', name:'郑凯文', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'fail', hrScreeningBy:'刘洋', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'简历不符合要求', yoe:'2' },
+    { id:'P011', recruitDate:'2026-02-03', name:'黄诗涵', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'accepted', onboardDate:'2026-03-15', comments:'', yoe:'0' },
+    { id:'P012', recruitDate:'2026-02-05', name:'林浩宇', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'fail', interview2By:'刘洋', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'技术深度不足', yoe:'3' },
+    { id:'P013', recruitDate:'2026-02-08', name:'高雨晨', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pending', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'终面待安排', yoe:'7' },
+    { id:'P014', recruitDate:'2026-02-10', name:'何子轩', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'fail', interview1By:'王强', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P015', recruitDate:'2026-02-12', name:'马思聪', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'刘洋', score:'4', offering:'accepted', onboardDate:'2026-04-01', comments:'', yoe:'5' },
+    { id:'P016', recruitDate:'2026-02-15', name:'罗雅琪', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'fail', interviewFinalBy:'刘洋', score:'3', offering:'', onboardDate:'', comments:'终面未通过', yoe:'0' },
+    { id:'P017', recruitDate:'2026-02-18', name:'谢明辉', team:'Marketing', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'declined', onboardDate:'', comments:'薪资未达预期', yoe:'6' },
+    { id:'P018', recruitDate:'2026-02-20', name:'徐志远', team:'Marketing', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'周婷', hrScreening:'fail', hrScreeningBy:'刘洋', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'经验不匹配', yoe:'1' },
+    { id:'P019', recruitDate:'2026-02-22', name:'杨雨萱', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'刘洋', score:'5', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'4' },
+    { id:'P020', recruitDate:'2026-02-25', name:'朱伟杰', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'fail', interview2By:'王强', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P021', recruitDate:'2026-03-01', name:'丁晓峰', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'accepted', onboardDate:'2026-04-15', comments:'资深前端', yoe:'10' },
+    { id:'P022', recruitDate:'2026-03-03', name:'范思琪', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pending', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P023', recruitDate:'2026-03-05', name:'蔡明远', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'declined', onboardDate:'', comments:'收到其他offer', yoe:'4' },
+    { id:'P024', recruitDate:'2026-03-08', name:'曹雪琴', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'2026-04-20', comments:'校招优秀', yoe:'0' },
+    { id:'P025', recruitDate:'2026-03-10', name:'彭浩然', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'fail', interview1By:'张伟', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'测试基础薄弱', yoe:'2' },
+    { id:'P026', recruitDate:'2026-03-12', name:'董雅婷', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'6' },
+    { id:'P027', recruitDate:'2026-03-15', name:'宋子涵', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'fail', hrScreeningBy:'李娜', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'简历筛选未通过', yoe:'0' },
+    { id:'P028', recruitDate:'2026-03-18', name:'邓瑞祥', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'张伟', interviewFinal:'pending', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'终面待安排', yoe:'5' },
+    { id:'P029', recruitDate:'2026-03-20', name:'姜文静', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'declined', onboardDate:'', comments:'去了竞争对手', yoe:'8' },
+    { id:'P030', recruitDate:'2026-03-22', name:'秦雨辰', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'accepted', onboardDate:'2026-05-01', comments:'', yoe:'0' },
+  ].map((c) => {
+    const base = {};
+    ['recruitDate','name','team','position','hiringLine','recruitType','recruiter',
+     'hrScreening','hrScreeningBy','hrInterview','interview1','interview1By',
+     'interview2','interview2By','interviewFinal','interviewFinalBy',
+     'score','offering','onboardDate','comments','yoe',
+     'personnelType','companyLevel','levelPosition','shippedDate','offerBIDate',
+     'cash','offerMakeScope','workLocation','basePackage','briStart'].forEach((k) => { base[k] = c[k] || ''; });
+    base.id = c.id;
+    return base;
   });
 
   saveKey('departments', departments);
@@ -398,12 +410,132 @@ function seedAllData(lineId) {
   saveKey('positionRecruitTags', positionRecruitTags);
   saveKey('recruitmentPositionMetrics', recruitmentPositionMetrics);
   saveKey('recruitmentCandidates', recruitmentCandidates);
+  saveKey('recruitmentPipeline', recruitmentPipeline);
+
+  const interviewerPool = [
+    { id: 1, employeeId: 1005, trades: ['Frontend', 'Backend'], levels: ['E', 'SE', 'EE'] },
+    { id: 2, employeeId: 1008, trades: ['Algorithm', 'Big Data'], levels: ['SE', 'EE', 'SEE'] },
+    { id: 3, employeeId: 1011, trades: ['Frontend', 'Mobile'], levels: ['E', 'SE'] },
+    { id: 4, employeeId: 1006, trades: ['Frontend'], levels: ['E', 'SE', 'EE', 'SEE'] },
+    { id: 5, employeeId: 1004, trades: ['Backend', 'SDET'], levels: ['E', 'SE', 'EE'] },
+    { id: 6, employeeId: 1009, trades: ['QA', 'SDET'], levels: ['E', 'SE'] },
+  ];
+  saveKey('interviewerPool', interviewerPool);
+
   saveKey('orgSettings', { productLineOwnerEmployeeId: 1001 });
   saveKey('orgChangeRequests', []);
-  saveKey('_seedVersion', 11);
+  saveKey('_seedVersion', 13);
 
   return { seeded: true };
 }
 
 TM.seedAllData = seedAllData;
+
+/**
+ * Patch-only: inject pipeline demo data + recruit tags into existing line
+ * without touching employees, departments, positions, etc.
+ */
+function seedPipelineDemo(lineId) {
+  const lid = lineId != null ? Number(lineId) : 1;
+  const saveKey = (k, v) => TM.saveKeyForLine(lid, k, v);
+  const departments = TM.loadKeyForLine(lid, 'departments', []) || [];
+  const positions = TM.loadKeyForLine(lid, 'positions', []) || [];
+  const employees = TM.loadKeyForLine(lid, 'employees', []) || [];
+
+  const openSlots = [
+    { deptId: 1, posName: 'Frontend',  priority: 'high' },
+    { deptId: 1, posName: 'Backend',   priority: 'high' },
+    { deptId: 1, posName: 'Algorithm', priority: 'medium' },
+    { deptId: 1, posName: 'SDET',      priority: 'low' },
+    { deptId: 2, posName: 'Frontend',  priority: 'high' },
+    { deptId: 2, posName: 'Big Data',  priority: 'medium' },
+    { deptId: 3, posName: 'Frontend',  priority: 'medium' },
+    { deptId: 3, posName: 'Backend',   priority: 'low' },
+    { deptId: 4, posName: 'Mobile',    priority: 'medium' },
+  ];
+  const existingTags = TM.loadKeyForLine(lid, 'positionRecruitTags', {}) || {};
+  const tags = { ...existingTags };
+  openSlots.forEach(({ deptId, posName, priority }) => {
+    const p = positions.find((x) => x.departmentId === deptId && x.name === posName);
+    if (!p) return;
+    const taken = employees.some((e) => e.positionId === p.id && e.departmentId === p.departmentId && e.status !== 'leave');
+    if (taken) return;
+    const k = `${deptId}-${p.id}`;
+    if (!tags[k]) tags[k] = { priority };
+  });
+  saveKey('positionRecruitTags', tags);
+
+  const deptMap = {};
+  departments.forEach((d) => { deptMap[d.id] = d.name; });
+
+  const pipeline = [
+    { id:'P001', recruitDate:'2026-01-05', name:'张明华', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'2026-03-01', comments:'', yoe:'5' },
+    { id:'P002', recruitDate:'2026-01-08', name:'李思雨', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'fail', interviewFinalBy:'陈静', score:'3', offering:'', onboardDate:'', comments:'终面表现一般', yoe:'0' },
+    { id:'P003', recruitDate:'2026-01-10', name:'王浩然', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'5', offering:'accepted', onboardDate:'2026-02-20', comments:'优秀候选人', yoe:'8' },
+    { id:'P004', recruitDate:'2026-01-12', name:'赵晓琳', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'fail', interview2By:'张伟', interviewFinal:'', interviewFinalBy:'', score:'3', offering:'', onboardDate:'', comments:'', yoe:'4' },
+    { id:'P005', recruitDate:'2026-01-15', name:'刘佳怡', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'王强', score:'4', offering:'pending', onboardDate:'', comments:'等待offer审批', yoe:'0' },
+    { id:'P006', recruitDate:'2026-01-18', name:'陈宇飞', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pending', interview1By:'陈静', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'一面待安排', yoe:'6' },
+    { id:'P007', recruitDate:'2026-01-20', name:'孙婷婷', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'declined', onboardDate:'', comments:'候选人拒绝offer', yoe:'3' },
+    { id:'P008', recruitDate:'2026-01-22', name:'周文博', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pending', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'', yoe:'3' },
+    { id:'P009', recruitDate:'2026-01-25', name:'吴美琪', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'0' },
+    { id:'P010', recruitDate:'2026-02-01', name:'郑凯文', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'fail', hrScreeningBy:'刘洋', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'简历不符合要求', yoe:'2' },
+    { id:'P011', recruitDate:'2026-02-03', name:'黄诗涵', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'accepted', onboardDate:'2026-03-15', comments:'', yoe:'0' },
+    { id:'P012', recruitDate:'2026-02-05', name:'林浩宇', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'fail', interview2By:'刘洋', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'技术深度不足', yoe:'3' },
+    { id:'P013', recruitDate:'2026-02-08', name:'高雨晨', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pending', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'终面待安排', yoe:'7' },
+    { id:'P014', recruitDate:'2026-02-10', name:'何子轩', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'fail', interview1By:'王强', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P015', recruitDate:'2026-02-12', name:'马思聪', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'刘洋', score:'4', offering:'accepted', onboardDate:'2026-04-01', comments:'', yoe:'5' },
+    { id:'P016', recruitDate:'2026-02-15', name:'罗雅琪', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'fail', interviewFinalBy:'刘洋', score:'3', offering:'', onboardDate:'', comments:'终面未通过', yoe:'0' },
+    { id:'P017', recruitDate:'2026-02-18', name:'谢明辉', team:'Marketing', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'declined', onboardDate:'', comments:'薪资未达预期', yoe:'6' },
+    { id:'P018', recruitDate:'2026-02-20', name:'徐志远', team:'Marketing', position:'Backend', hiringLine:'L2', recruitType:'social', recruiter:'周婷', hrScreening:'fail', hrScreeningBy:'刘洋', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'经验不匹配', yoe:'1' },
+    { id:'P019', recruitDate:'2026-02-22', name:'杨雨萱', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'刘洋', score:'5', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'4' },
+    { id:'P020', recruitDate:'2026-02-25', name:'朱伟杰', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'fail', interview2By:'王强', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P021', recruitDate:'2026-03-01', name:'丁晓峰', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'accepted', onboardDate:'2026-04-15', comments:'资深前端', yoe:'10' },
+    { id:'P022', recruitDate:'2026-03-03', name:'范思琪', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'campus', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pending', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'', yoe:'0' },
+    { id:'P023', recruitDate:'2026-03-05', name:'蔡明远', team:'Product', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'陈静', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'declined', onboardDate:'', comments:'收到其他offer', yoe:'4' },
+    { id:'P024', recruitDate:'2026-03-08', name:'曹雪琴', team:'Engineering', position:'Backend', hiringLine:'L2', recruitType:'campus', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'2026-04-20', comments:'校招优秀', yoe:'0' },
+    { id:'P025', recruitDate:'2026-03-10', name:'彭浩然', team:'Engineering', position:'SDET', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'fail', interview1By:'张伟', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'2', offering:'', onboardDate:'', comments:'测试基础薄弱', yoe:'2' },
+    { id:'P026', recruitDate:'2026-03-12', name:'董雅婷', team:'Product', position:'Big Data', hiringLine:'L2', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'王强', interview2:'pass', interview2By:'张伟', interviewFinal:'pass', interviewFinalBy:'陈静', score:'4', offering:'accepted', onboardDate:'', comments:'待入职', yoe:'6' },
+    { id:'P027', recruitDate:'2026-03-15', name:'宋子涵', team:'Engineering', position:'Frontend', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'fail', hrScreeningBy:'李娜', hrInterview:'', interview1:'', interview1By:'', interview2:'', interview2By:'', interviewFinal:'', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'简历筛选未通过', yoe:'0' },
+    { id:'P028', recruitDate:'2026-03-18', name:'邓瑞祥', team:'Marketing', position:'Frontend', hiringLine:'L1', recruitType:'social', recruiter:'周婷', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'张伟', interviewFinal:'pending', interviewFinalBy:'', score:'', offering:'', onboardDate:'', comments:'终面待安排', yoe:'5' },
+    { id:'P029', recruitDate:'2026-03-20', name:'姜文静', team:'Engineering', position:'Algorithm', hiringLine:'L3', recruitType:'social', recruiter:'孙磊', hrScreening:'pass', hrScreeningBy:'刘洋', hrInterview:'pass', interview1:'pass', interview1By:'陈静', interview2:'pass', interview2By:'王强', interviewFinal:'pass', interviewFinalBy:'张伟', score:'5', offering:'declined', onboardDate:'', comments:'去了竞争对手', yoe:'8' },
+    { id:'P030', recruitDate:'2026-03-22', name:'秦雨辰', team:'Sales', position:'Mobile', hiringLine:'L1', recruitType:'campus', recruiter:'赵敏', hrScreening:'pass', hrScreeningBy:'李娜', hrInterview:'pass', interview1:'pass', interview1By:'张伟', interview2:'pass', interview2By:'刘洋', interviewFinal:'pass', interviewFinalBy:'王强', score:'3', offering:'accepted', onboardDate:'2026-05-01', comments:'', yoe:'0' },
+  ].map((c) => {
+    const base = {};
+    ['recruitDate','name','team','position','hiringLine','recruitType','recruiter',
+     'hrScreening','hrScreeningBy','hrInterview','interview1','interview1By',
+     'interview2','interview2By','interviewFinal','interviewFinalBy',
+     'score','offering','onboardDate','comments','yoe',
+     'personnelType','companyLevel','levelPosition','shippedDate','offerBIDate',
+     'cash','offerMakeScope','workLocation','basePackage','briStart'].forEach((k) => { base[k] = c[k] || ''; });
+    base.id = c.id;
+    return base;
+  });
+  const existingPipe = TM.loadKeyForLine(lid, 'recruitmentPipeline', null);
+  if (!existingPipe || !existingPipe.length) {
+    saveKey('recruitmentPipeline', pipeline);
+  }
+
+  const existingPool = TM.loadKeyForLine(lid, 'interviewerPool', null);
+  if (!existingPool || !existingPool.length) {
+    const emps = TM.loadKeyForLine(lid, 'employees', []) || [];
+    const pool = [];
+    let pid = 1;
+    const poolConfigs = [
+      { trades: ['Frontend', 'Backend'], levels: ['E', 'SE', 'EE'] },
+      { trades: ['Algorithm', 'Big Data'], levels: ['SE', 'EE', 'SEE'] },
+      { trades: ['Frontend', 'Mobile'], levels: ['E', 'SE'] },
+      { trades: ['Frontend'], levels: ['E', 'SE', 'EE', 'SEE'] },
+      { trades: ['Backend', 'SDET'], levels: ['E', 'SE', 'EE'] },
+      { trades: ['QA', 'SDET'], levels: ['E', 'SE'] },
+    ];
+    const activeEmps = emps.filter((e) => e.status !== 'leave');
+    poolConfigs.forEach((cfg, i) => {
+      if (activeEmps[i]) {
+        pool.push({ id: pid++, employeeId: activeEmps[i].id, trades: cfg.trades, levels: cfg.levels });
+      }
+    });
+    saveKey('interviewerPool', pool);
+  }
+}
+TM.seedPipelineDemo = seedPipelineDemo;
 })(window.TM);

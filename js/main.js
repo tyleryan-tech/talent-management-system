@@ -53,6 +53,12 @@
     if (lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
       TM.seedAllData(lineId);
       window.__TM_FIRST_SEED__ = true;
+    } else if (lineId != null) {
+      const sv = TM.loadKeyForLine(lineId, '_seedVersion', 0);
+      if (sv < 13) {
+        if (typeof TM.seedPipelineDemo === 'function') TM.seedPipelineDemo(lineId);
+        TM.saveKeyForLine(lineId, '_seedVersion', 13);
+      }
     }
     dataStore.hydrate();
   }

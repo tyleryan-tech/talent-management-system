@@ -228,6 +228,10 @@ window.TM.useDataStore = defineStore('data', {
     recruitmentCandidates: [],
     /** 岗位招聘过程指标，key 同待招 `部门id-编制id` */
     recruitmentPositionMetrics: {},
+    /** 候选人 pipeline（表格化跟踪，可内联编辑/Excel 导入） */
+    recruitmentPipeline: [],
+    /** 面试官池：[{ id, employeeId, trades:[], levels:[] }] */
+    interviewerPool: [],
     /** 产品线负责人工号（组织调整审批链最后一位） */
     orgSettings: { productLineOwnerEmployeeId: null },
     /** 组织调整审批单 */
@@ -239,7 +243,7 @@ window.TM.useDataStore = defineStore('data', {
     hydrate() {
       const rawEmps = lineScopedLoad('employees', []);
       this.employees = (rawEmps || []).map((e) => ({ ...EMPLOYEE_EXTRA_DEFAULTS, ...e }));
-      this.departments = lineScopedLoad('departments', []);
+      this.departments = (lineScopedLoad('departments', []) || []).map((d) => ({ hcPlan: 0, ...d }));
       {
         const rawPos = lineScopedLoad('positions', []) || [];
         let posChanged = false;
@@ -314,6 +318,8 @@ window.TM.useDataStore = defineStore('data', {
       }
       this.recruitmentCandidates = lineScopedLoad('recruitmentCandidates', []);
       this.recruitmentPositionMetrics = lineScopedLoad('recruitmentPositionMetrics', {}) || {};
+      this.recruitmentPipeline = lineScopedLoad('recruitmentPipeline', []);
+      this.interviewerPool = lineScopedLoad('interviewerPool', []) || [];
       this.orgSettings = {
         productLineOwnerEmployeeId: null,
         ...(lineScopedLoad('orgSettings', {}) || {}),
@@ -350,6 +356,8 @@ window.TM.useDataStore = defineStore('data', {
       lineScopedSave('positionRecruitTags', this.positionRecruitTags || {});
       lineScopedSave('recruitmentCandidates', this.recruitmentCandidates || []);
       lineScopedSave('recruitmentPositionMetrics', this.recruitmentPositionMetrics || {});
+      lineScopedSave('recruitmentPipeline', this.recruitmentPipeline || []);
+      lineScopedSave('interviewerPool', this.interviewerPool || []);
       lineScopedSave('orgSettings', this.orgSettings || {});
       lineScopedSave('orgChangeRequests', this.orgChangeRequests || []);
       lineScopedSave('rosterColumnSettings', this.rosterColumnSettings);
@@ -409,6 +417,7 @@ window.TM.useDataStore = defineStore('data', {
         }
         return u;
       });
+      this.interviewerPool = (this.interviewerPool || []).filter((p) => empIds.has(Number(p.employeeId)));
     },
     // 员工
     addEmployee(row) {
@@ -487,12 +496,17 @@ window.TM.useDataStore = defineStore('data', {
     setEmployeeStatus(id, status) {
       this.updateEmployee(id, { status });
     },
-    // 部门
     addDepartment(row) {
       const id = uid(this.departments);
-      this.departments.push({ ...row, id });
+      this.departments.push({ ...row, id, hcPlan: Number(row.hcPlan) || 0 });
       this.persistAll();
       return id;
+    },
+    updateDeptHcPlan(id, val) {
+      const i = this.departments.findIndex((d) => d.id === id);
+      if (i < 0) return;
+      this.departments[i] = { ...this.departments[i], hcPlan: Math.max(0, Number(val) || 0) };
+      this.persistAll();
     },
     updateDepartment(id, patch) {
       const i = this.departments.findIndex((d) => d.id === id);
@@ -511,14 +525,12 @@ window.TM.useDataStore = defineStore('data', {
       this.departments = this.departments.filter((d) => d.id !== id);
       this.persistAll();
     },
-    // 编制（工种）：名称仅允许 TM.JOB_TRADES 七种之一；同部门同工种唯一
     addPosition(row) {
       const trades = jobTradesList();
       const depId = Number(row.departmentId);
       if (Number.isNaN(depId)) return null;
       let name = normalizeJobTradeName(row.name);
       if (!trades.includes(name)) name = trades[0];
-      if (this.positions.some((p) => Number(p.departmentId) === depId && p.name === name)) return null;
       const id = uid(this.positions);
       this.positions.push({
         id,
@@ -539,8 +551,6 @@ window.TM.useDataStore = defineStore('data', {
       if (!trades.includes(name)) return false;
       const depId = Number(merged.departmentId);
       if (Number.isNaN(depId)) return false;
-      const dup = this.positions.some((p, j) => j !== i && Number(p.departmentId) === depId && p.name === name);
-      if (dup) return false;
       this.positions[i] = {
         ...merged,
         id: this.positions[i].id,
@@ -566,10 +576,22 @@ window.TM.useDataStore = defineStore('data', {
       this.orgSettings = { ...this.orgSettings, ...patch };
       this.persistAll();
     },
-    /** 提交组织调整审批（无审批链时自动生效） */
-    submitOrgChangeRequest({ type, title, payload }) {
+    /**
+     * 提交组织调整审批。
+     * submitter: { role, employeeId } — 当前操作人。
+     * HRBP / super_admin / 产品线负责人 → 免审批（自动生效）；
+     * 汇报经理 → 走审批链。
+     */
+    submitOrgChangeRequest({ type, title, payload, submitter }) {
       const TM = window.TM;
-      const chain = TM.buildOrgApprovalChain ? TM.buildOrgApprovalChain(this, type, payload) : [];
+      const sub = submitter || {};
+      const isHrbpOrAdmin = sub.role === 'hrbp' || sub.role === 'super_admin';
+      const own = this.orgSettings?.productLineOwnerEmployeeId;
+      const isOwner = own != null && own !== '' && Number(sub.employeeId) === Number(own);
+      const skipApproval = isHrbpOrAdmin || isOwner;
+      const chain = skipApproval
+        ? []
+        : (TM.buildOrgApprovalChain ? TM.buildOrgApprovalChain(this, type, payload) : []);
       const id = uid(this.orgChangeRequests);
       const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
       const row = {
@@ -582,6 +604,7 @@ window.TM.useDataStore = defineStore('data', {
         approvalChain: chain,
         pendingApproverId: chain[0] ?? null,
         submittedAt: now,
+        submitterRole: sub.role || '',
         log: [],
       };
       if (!chain.length) {
@@ -593,7 +616,7 @@ window.TM.useDataStore = defineStore('data', {
         }
         row.status = 'approved';
         row.pendingApproverId = null;
-        row.log = [{ action: 'auto', at: now, note: '无审批人链，已自动生效' }];
+        row.log = [{ action: 'auto', at: now, note: skipApproval ? 'HRBP/负责人操作，免审批' : '无审批人链，已自动生效' }];
       }
       this.orgChangeRequests = [...(this.orgChangeRequests || []), row];
       this.persistAll();
@@ -675,7 +698,9 @@ window.TM.useDataStore = defineStore('data', {
             departmentId: payload.departmentId,
             reportingManagerId: payload.reportingManagerId || null,
           });
-          if (nid == null) break;
+          if (nid == null) {
+            throw new Error('Target HC 创建失败：部门无效或数据异常');
+          }
           payload.createdId = nid;
           if (payload.markRecruitAfter) {
             this.setPositionRecruitTagged(Number(payload.departmentId), nid, true);
@@ -685,9 +710,13 @@ window.TM.useDataStore = defineStore('data', {
         case 'position_delete':
           this.removePosition(payload.id);
           break;
-        case 'position_update':
-          this.updatePosition(payload.id, payload.patch);
+        case 'position_update': {
+          const ok = this.updatePosition(payload.id, payload.patch);
+          if (!ok) {
+            throw new Error('Target HC 更新失败：目标记录不存在或数据冲突');
+          }
           break;
+        }
         default:
           break;
       }
@@ -1140,8 +1169,8 @@ window.TM.useDataStore = defineStore('data', {
         'trainings', 'employeeTrainings', 'users',
         'attendanceRules', 'attendanceRecords', 'punchRecords', 'kpiLibrary', 'performanceCycles',
         'talentMatrix', 'successionPlans', 'notifications', 'positionRecruitTags',
-        'recruitmentCandidates', 'recruitmentPositionMetrics',
-        'orgSettings', 'orgChangeRequests', 'rosterColumnSettings',
+        'recruitmentCandidates', 'recruitmentPositionMetrics', 'recruitmentPipeline',
+        'interviewerPool', 'orgSettings', 'orgChangeRequests', 'rosterColumnSettings',
       ];
       keys.forEach((k) => {
         if (k === 'rosterColumnSettings') return;
@@ -1208,6 +1237,8 @@ window.TM.useDataStore = defineStore('data', {
         positionRecruitTags: this.positionRecruitTags || {},
         recruitmentCandidates: this.recruitmentCandidates || [],
         recruitmentPositionMetrics: this.recruitmentPositionMetrics || {},
+        recruitmentPipeline: this.recruitmentPipeline || [],
+        interviewerPool: this.interviewerPool || [],
         orgSettings: this.orgSettings || {},
         orgChangeRequests: this.orgChangeRequests || [],
         rosterColumnSettings: this.rosterColumnSettings,

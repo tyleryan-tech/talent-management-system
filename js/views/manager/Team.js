@@ -21,11 +21,12 @@ function buildReportTree(data, rootId) {
         <div class="card pad">
           <h3 class="section-title">Direct reports</h3>
           <table class="data-table">
-            <thead><tr><th>Name</th><th>Job function</th><th>Hire date</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Job function</th><th>Status</th><th>Hire date</th><th></th></tr></thead>
             <tbody>
               <tr v-for="e in direct" :key="e.id">
                 <td>{{ e.name }}</td>
                 <td>{{ posName(e.positionId) }}</td>
+                <td>{{ empStatusEn(e.status) }}</td>
                 <td>{{ e.hireDate }}</td>
                 <td><button type="button" class="btn-link" @click="detail = e">Details</button></td>
               </tr>
@@ -161,7 +162,7 @@ function buildReportTree(data, rootId) {
 
     onUnmounted(() => chartInst?.dispose());
 
-    return { direct, chartRef, detail, detailKv, posName, reviewsOf, leavesOf, cycleLabel, perfStatusEn, leaveStatusEn };
+    return { direct, chartRef, detail, detailKv, posName, empStatusEn, reviewsOf, leavesOf, cycleLabel, perfStatusEn, leaveStatusEn };
   },
 };
 })();
