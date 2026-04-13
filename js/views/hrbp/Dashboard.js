@@ -1,5 +1,5 @@
 (function () {
-  const { computed, onMounted, ref, watch, nextTick } = Vue;
+  const { computed, onMounted, onUnmounted, ref, watch, nextTick } = Vue;
   const useDataStore = window.TM.useDataStore;
   const loadEcharts = window.TM.loadEcharts;
   const chartPrefs = window.TM.chartPrefs;
@@ -165,6 +165,7 @@
   `,
   setup() {
     const data = useDataStore();
+    const zs = window.TM.useZoneScope(data);
     const chartDept = ref(null);
     const chartStatus = ref(null);
     let echartsLib = null;
@@ -203,20 +204,23 @@
       window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Custom chart added', type: 'success' } }));
     }
 
+    const emps = computed(() => zs.scopedEmployees.value);
+    const depts = computed(() => zs.scopedDepartments.value);
+
     const stats = computed(() => {
-      const emps = data.employees;
+      const e = emps.value;
+      const prefix = zs.isManagerZone.value ? 'Team ' : 'Total ';
       return [
-        { k: 'total', label: 'Total employees', value: emps.length },
-        { k: 'emp', label: 'Active (incl. probation)', value: emps.filter((e) => e.status !== 'leave').length },
-        { k: 'leave', label: 'Leaving', value: emps.filter((e) => e.status === 'leave').length },
+        { k: 'total', label: prefix + 'employees', value: e.length },
+        { k: 'emp', label: 'Active (incl. probation)', value: e.filter((x) => x.status !== 'leave').length },
+        { k: 'leave', label: 'Leaving', value: e.filter((x) => x.status === 'leave').length },
       ];
     });
 
     const STATUS_COLORS = { active: '#6366f1', probation: '#f59e0b', leave: '#ef4444' };
     const statusNums = computed(() => {
-      const emps = data.employees;
       const cnt = { active: 0, probation: 0, leave: 0 };
-      emps.forEach((e) => { cnt[e.status] = (cnt[e.status] || 0) + 1; });
+      emps.value.forEach((e) => { cnt[e.status] = (cnt[e.status] || 0) + 1; });
       return [
         { label: 'Active', value: cnt.active, color: STATUS_COLORS.active },
         { label: 'Probation', value: cnt.probation, color: STATUS_COLORS.probation },
@@ -224,16 +228,22 @@
       ];
     });
 
+    function handleResize() {
+      if (cDept) cDept.resize();
+      if (cStatus) cStatus.resize();
+    }
+
     async function renderDept() {
       if (!chartDept.value) return;
       if (!echartsLib) echartsLib = await loadEcharts();
       const byDept = {};
-      data.departments.forEach((d) => { byDept[d.id] = 0; });
-      data.employees.forEach((e) => {
+      depts.value.forEach((d) => { byDept[d.id] = 0; });
+      emps.value.forEach((e) => {
         if (e.status !== 'leave') byDept[e.departmentId] = (byDept[e.departmentId] || 0) + 1;
       });
-      const deptNames = data.departments.map((d) => d.name);
-      const deptVals = data.departments.map((d) => byDept[d.id] || 0);
+      const scopeDepts = depts.value.filter((d) => byDept[d.id] > 0 || !zs.isManagerZone.value);
+      const deptNames = scopeDepts.map((d) => d.name);
+      const deptVals = scopeDepts.map((d) => byDept[d.id] || 0);
       if (cDept) cDept.dispose();
       cDept = echartsLib.init(chartDept.value);
       cDept.setOption({
@@ -242,14 +252,13 @@
         yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed' } } },
         series: [{ type: 'bar', data: deptVals, itemStyle: { color: '#6366f1', borderRadius: [6, 6, 0, 0] } }],
       });
-      window.addEventListener('resize', () => cDept && cDept.resize());
     }
 
     async function renderStatus() {
       if (!chartStatus.value) return;
       if (!echartsLib) echartsLib = await loadEcharts();
       const st = { active: 0, probation: 0, leave: 0 };
-      data.employees.forEach((e) => { st[e.status] = (st[e.status] || 0) + 1; });
+      emps.value.forEach((e) => { st[e.status] = (st[e.status] || 0) + 1; });
       if (cStatus) cStatus.dispose();
       cStatus = echartsLib.init(chartStatus.value);
       cStatus.setOption({
@@ -278,14 +287,20 @@
           ],
         }],
       });
-      window.addEventListener('resize', () => cStatus && cStatus.resize());
     }
 
     onMounted(() => {
+      window.addEventListener('resize', handleResize);
       nextTick(() => {
         renderDept();
         renderStatus();
       });
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('resize', handleResize);
+      if (cDept) { cDept.dispose(); cDept = null; }
+      if (cStatus) { cStatus.dispose(); cStatus = null; }
     });
 
     watch(() => chartPrefs.hidden.slice(), () => {
@@ -295,10 +310,14 @@
       });
     });
 
+    watch(emps, () => {
+      nextTick(() => { renderDept(); renderStatus(); });
+    });
+
     return {
       stats, statusNums, chartDept, chartStatus, chartPrefs,
       showPanel, showAddChart, newChart, saveCustomChart,
-      allHiddenCharts, visibleCustomCharts,
+      allHiddenCharts, visibleCustomCharts, zs,
     };
   },
 };

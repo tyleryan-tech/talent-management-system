@@ -1,5 +1,5 @@
 (function () {
-  const { computed, onMounted, ref } = Vue;
+  const { computed, onMounted, onUnmounted, ref } = Vue;
   const useAuthStore = window.TM.useAuthStore;
   const useDataStore = window.TM.useDataStore;
   const loadEcharts = window.TM.loadEcharts;
@@ -30,12 +30,21 @@ const GRADES = window.TM.PERF_GRADE_OPTIONS || ['A+', 'A', 'A-', 'B+', 'B', 'C',
     const me = computed(() => auth.currentUser?.employeeId);
     const subsIds = computed(() => data.employees.filter((e) => e.managerId === me.value).map((e) => e.id));
 
+    let ch1 = null, ch2 = null, ch3 = null;
+
+    function handleResize() {
+      if (ch1) ch1.resize();
+      if (ch2) ch2.resize();
+      if (ch3) ch3.resize();
+    }
+
     onMounted(async () => {
       const echarts = await loadEcharts();
       const ids = subsIds.value;
 
+      const idsSet = new Set(ids);
       const reviews = data.performanceReviews.filter(
-        (r) => ids.includes(r.employeeId) && r.status === 'finalized' && r.finalGrade && GRADES.includes(String(r.finalGrade).trim()),
+        (r) => idsSet.has(r.employeeId) && r.status === 'finalized' && r.finalGrade && GRADES.includes(String(r.finalGrade).trim()),
       );
       const gm = {};
       GRADES.forEach((g) => { gm[g] = 0; });
@@ -44,20 +53,20 @@ const GRADES = window.TM.PERF_GRADE_OPTIONS || ['A+', 'A', 'A-', 'B+', 'B', 'C',
         if (gm[g] != null) gm[g] += 1;
       });
       const pieData = GRADES.map((k) => ({ name: k, value: gm[k] })).filter((x) => x.value > 0);
-      const ch1 = echarts.init(c1.value);
+      ch1 = echarts.init(c1.value);
       ch1.setOption({
         tooltip: { trigger: 'item' },
         series: [{ type: 'pie', radius: ['40%', '65%'], data: pieData.length ? pieData : [{ name: 'None', value: 0 }] }],
       });
 
-      const recs = data.attendanceRecords.filter((r) => ids.includes(r.employeeId));
+      const recs = data.attendanceRecords.filter((r) => idsSet.has(r.employeeId));
       const months = [...new Set(recs.map((r) => r.month))].sort();
       const rates = months.map((m) => {
         const chunk = recs.filter((r) => r.month === m);
         if (!chunk.length) return 0;
         return Math.round(chunk.reduce((a, b) => a + b.attendanceRate, 0) / chunk.length);
       });
-      const ch2 = echarts.init(c2.value);
+      ch2 = echarts.init(c2.value);
       ch2.setOption({
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: months },
@@ -65,10 +74,10 @@ const GRADES = window.TM.PERF_GRADE_OPTIONS || ['A+', 'A', 'A-', 'B+', 'B', 'C',
         series: [{ type: 'line', smooth: true, data: rates, areaStyle: { opacity: 0.08 }, itemStyle: { color: '#10b981' } }],
       });
 
-      const trains = data.employeeTrainings.filter((t) => ids.includes(t.employeeId));
+      const trains = data.employeeTrainings.filter((t) => idsSet.has(t.employeeId));
       const done = trains.filter((t) => t.status === 'completed').length;
       const prog = trains.filter((t) => t.status === 'in_progress').length;
-      const ch3 = echarts.init(c3.value);
+      ch3 = echarts.init(c3.value);
       ch3.setOption({
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: ['Completed', 'In progress', 'Not enrolled'] },
@@ -80,11 +89,14 @@ const GRADES = window.TM.PERF_GRADE_OPTIONS || ['A+', 'A', 'A-', 'B+', 'B', 'C',
         }],
       });
 
-      window.addEventListener('resize', () => {
-        ch1.resize();
-        ch2.resize();
-        ch3.resize();
-      });
+      window.addEventListener('resize', handleResize);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('resize', handleResize);
+      if (ch1) { ch1.dispose(); ch1 = null; }
+      if (ch2) { ch2.dispose(); ch2 = null; }
+      if (ch3) { ch3.dispose(); ch3 = null; }
     });
 
     return { c1, c2, c3 };

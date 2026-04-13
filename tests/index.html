@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="tm-api-base" content="__OFF__" />
+  <title>Talent Hub - Test Runner</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
+    h1 { color: #00d4aa; margin-bottom: 1rem; }
+    #output { background: #16213e; border-radius: 8px; padding: 1.5rem; font-family: 'Consolas', monospace; font-size: 14px; line-height: 1.8; white-space: pre-wrap; max-height: 80vh; overflow-y: auto; }
+    .passed { color: #00d4aa; }
+    .failed { color: #ff6b6b; }
+    .suite { color: #74b9ff; font-weight: bold; }
+    .summary { color: #ffd93d; font-size: 16px; font-weight: bold; margin-top: 1rem; }
+    button { background: #00d4aa; color: #1a1a2e; border: none; padding: 0.6rem 1.5rem; border-radius: 6px; font-size: 14px; cursor: pointer; margin-bottom: 1rem; }
+    button:hover { background: #00b894; }
+  </style>
+  <!-- Vue / Router / Pinia -->
+  <script src="https://unpkg.com/vue@3.4.27/dist/vue.global.prod.js"></script>
+  <script>window.VueDemi = Vue;</script>
+  <script src="https://unpkg.com/vue-router@4.4.0/dist/vue-router.global.prod.js"></script>
+  <script src="https://unpkg.com/pinia@2.2.1/dist/pinia.iife.js"></script>
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Talent Hub Test Runner</h1>
+  <button onclick="runTests()">Run All Tests</button>
+  <div id="output">Click "Run All Tests" to start...</div>
+
+  <!-- Core app scripts (needed for stores) -->
+  <script src="../js/storage.js"></script>
+  <script src="../js/storageIDB.js"></script>
+  <script src="../js/constants/jobTrades.js"></script>
+  <script src="../js/constants/jobLevels.js"></script>
+  <script src="../js/utils/attendanceCalc.js"></script>
+  <script src="../js/seed.js"></script>
+  <script src="../js/utils/tenureFormat.js"></script>
+  <script src="../js/utils/rosterFieldConfig.js"></script>
+  <script src="../js/utils/fieldMapper.js"></script>
+  <script src="../js/utils/chartPrefs.js"></script>
+  <script src="../js/utils/orgScope.js"></script>
+  <script src="../js/utils/orgApprovalChain.js"></script>
+  <script src="../js/utils/performanceWorkflow.js"></script>
+  <script src="../js/stores/domains/employeeStore.js"></script>
+  <script src="../js/stores/domains/performanceStore.js"></script>
+  <script src="../js/stores/domains/attendanceStore.js"></script>
+  <script src="../js/stores/domains/recruitmentStore.js"></script>
+  <script src="../js/stores/domains/commonStore.js"></script>
+  <script src="../js/stores/dataStore.js"></script>
+  <script src="../js/stores/authStore.js"></script>
+  <script src="../js/stores/hrScopeStore.js"></script>
+  <script src="../js/stores/productLineStore.js"></script>
+
+  <!-- Test framework -->
+  <script src="test-runner.js"></script>
+  <!-- Test suites -->
+  <script src="test-employee-crud.js"></script>
+  <script src="test-performance-workflow.js"></script>
+  <script src="test-organization.js"></script>
+  <script src="test-data-sync.js"></script>
+
+  <script>
+    // Initialize Pinia + stores for testing
+    const pinia = Pinia.createPinia();
+    const app = Vue.createApp({ template: '<div/>' });
+    app.use(pinia);
+    app.mount(document.createElement('div'));
+
+    const TM = window.TM;
+    const plStore = TM.useProductLineStore();
+    plStore.hydrate();
+    const lineId = plStore.currentLineId;
+    if (lineId && !TM.lineHasEmployeeStorage(lineId)) {
+      TM.seedAllData(lineId);
+    }
+    TM.useDataStore().hydrate();
+    TM.useAuthStore().restoreSession();
+
+    async function runTests() {
+      const output = document.getElementById('output');
+      const lines = [];
+      const log = (msg) => {
+        lines.push(msg);
+        let html = lines.join('\n')
+          .replace(/📋\s*(.+)/g, '<span class="suite">📋 $1</span>')
+          .replace(/✅\s*(.+)/g, '<span class="passed">  ✅ $1</span>')
+          .replace(/❌\s*(.+)/g, '<span class="failed">  ❌ $1</span>')
+          .replace(/📊\s*(.+)/g, '<span class="summary">📊 $1</span>');
+        output.innerHTML = html;
+      };
+      const results = await TM._testRunner.runAll({ log });
+      return results;
+    }
+  </script>
+</body>
+</html>

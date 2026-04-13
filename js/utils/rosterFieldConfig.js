@@ -201,6 +201,13 @@
       excelAliases: ['Email', '邮箱', 'E-mail'],
       keywords: ['email', 'mail', '邮箱'],
     },
+    {
+      key: 'avgHours6m',
+      defaultLabel: 'Avg Hours (6m)',
+      exportable: true,
+      excelAliases: ['Avg Hours 6m', '6个月平均工时', '日均工时'],
+      keywords: ['hours', '工时', 'avg', 'attendance', '考勤', '出勤'],
+    },
   ];
 
   const BY_KEY = Object.fromEntries(DEFS.map((d) => [d.key, d]));
@@ -209,7 +216,7 @@
     const order = [
       'staffId', 'displayName', 'teamPath', 'team', 'jobFunction', 'rank', 'title', 'age', 'payPosition',
       'performance', 'school', 'yoe', 'companyTenure', 'tenureInCurrentRank', 'potential', 'managementPlan',
-      'reportingManager', 'status',
+      'reportingManager', 'status', 'avgHours6m',
     ];
     return {
       version: 1,

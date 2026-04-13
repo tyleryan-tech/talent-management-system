@@ -1,40 +1,13 @@
 (function () {
-  const { computed, onMounted, ref, watch } = Vue;
+  const { computed, ref, watch } = Vue;
   const useDataStore = window.TM.useDataStore;
   const useHrScopeStore = window.TM.useHrScopeStore;
   const createOrgScopeBindings = window.TM.createOrgScopeBindings;
-  const loadEcharts = window.TM.loadEcharts;
+  const att = window.TM.attendance;
 
-  function parseHeaderToYm(h, defaultYear) {
-    const s = String(h).trim().replace(/^\uFEFF/, '').replace(/\s/g, '');
-    let m = s.match(/^(\d{4})[-/](\d{1,2})$/);
-    if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
-    m = s.match(/^(\d{4})年(\d{1,2})月?$/);
-    if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
-    m = s.match(/^(\d{4})\.(\d{1,2})$/);
-    if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
-    m = s.match(/^(\d{1,2})月$/);
-    if (m && defaultYear) return `${defaultYear}-${m[1].padStart(2, '0')}`;
-    return null;
-  }
-
-  function inferDefaultYearFromHeaders(headers) {
-    let y = 0;
-    headers.forEach((h) => {
-      const ym = parseHeaderToYm(h, new Date().getFullYear());
-      if (ym) {
-        const yy = Number(ym.slice(0, 4));
-        if (yy > y) y = yy;
-      }
-    });
-    return y || new Date().getFullYear();
-  }
-
-  function normalizeYmCell(val, defaultYear) {
-    const s = String(val).trim();
-    const fromH = parseHeaderToYm(s, defaultYear);
-    if (fromH) return fromH;
-    return null;
+  function ensureXLSX() {
+    if (typeof XLSX === 'undefined') throw new Error('Excel library failed to load. Check your network and refresh.');
+    return XLSX;
   }
 
   function collectChildDeptIds(rootId, departments) {
@@ -52,141 +25,59 @@
     return ids;
   }
 
-  function quarterMonths(year, q) {
-    const y = Number(year);
-    const qi = Number(q);
-    const start = (qi - 1) * 3 + 1;
-    return [0, 1, 2].map((i) => `${y}-${String(start + i).padStart(2, '0')}`);
+  const PUNCH_SCHEMA = [
+    { key: 'employeeId', label: '工号', aliases: ['工号','Staff ID','Employee ID','Badge No','员工编号','ID','staffId'], keywords: ['工号','staff','employee','id','badge','编号'], required: true },
+    { key: 'date', label: '日期', aliases: ['日期','Date','Punch Date','打卡日期','考勤日期','Attendance Date'], keywords: ['日期','date','punch','考勤'], required: true },
+    { key: 'time', label: '打卡时间', aliases: ['时间','打卡时间','Punch Time','Clock Time','Time','签到时间','刷卡时间'], keywords: ['时间','time','clock','punch','签到','刷卡'], required: true },
+  ];
+
+  function splitDatetime(val) {
+    const s = String(val || '').trim();
+    let m = s.match(/^(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s*[T ]\s*(\d{1,2}:\d{2}(?::\d{2})?)/);
+    if (m) return { date: m[1].replace(/\//g, '-'), time: m[2] };
+    return null;
   }
 
-  function yearMonths(year) {
-    const y = String(year);
-    return Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
-  }
-
-  function periodMonths(period, monthVal, yearVal, qVal) {
-    if (period === 'month') return [monthVal];
-    if (period === 'quarter') return quarterMonths(yearVal, qVal);
-    if (period === 'year') return yearMonths(yearVal);
-    return [];
-  }
-
-  function getRecordAvgDaily(data, eid, ym) {
-    const r = data.attendanceRecords.find((x) => x.employeeId === eid && x.month === ym);
-    if (!r || r.avgDailyHours == null || Number.isNaN(Number(r.avgDailyHours))) return null;
-    return Number(r.avgDailyHours);
-  }
-
-  function employeePeriodAvgDaily(data, eid, months) {
-    const vals = [];
-    months.forEach((ym) => {
-      const v = getRecordAvgDaily(data, eid, ym);
-      if (v != null) vals.push(v);
-    });
-    if (!vals.length) return null;
-    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
-  }
-
-  function teamMeanPeriodAvgDaily(data, employeeIds, months) {
-    const perPerson = [];
-    employeeIds.forEach((eid) => {
-      const a = employeePeriodAvgDaily(data, eid, months);
-      if (a != null) perPerson.push(a);
-    });
-    if (!perPerson.length) return null;
-    return Math.round((perPerson.reduce((x, y) => x + y, 0) / perPerson.length) * 100) / 100;
-  }
-
-  function parseAvgHoursTable(text) {
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length);
-    if (!lines.length) return [];
-    const sep = lines[0].includes('\t') ? '\t' : ',';
-    const headers = lines[0].split(sep).map((c) => c.trim().replace(/^"|"$/g, '').replace(/^\uFEFF/, ''));
-    const lower = (h) => String(h).toLowerCase().replace(/\s/g, '');
-    const isIdCol = (h, i) => {
-      const k = lower(h);
-      return k === '工号' || k === 'staffid' || k === 'employeeid' || k === 'id' || (i === 0 && /工号|编号|staff|employee|id/i.test(h));
-    };
-    const isNameCol = (h) => /姓名|name/i.test(h);
-    const isMonthCol = (h) => /月|month|ym|period/i.test(h) && !/工时|小时|平均/.test(h);
-    const isHoursCol = (h) => /平均工时|日均|每天|工时|小时|avg|hours/i.test(h);
-
-    let idIdx = headers.findIndex((h, i) => isIdCol(h, i));
-    if (idIdx < 0) idIdx = 0;
-    const nameIdx = headers.findIndex((h) => isNameCol(h));
-    const defY = inferDefaultYearFromHeaders(headers);
-    const monthColIdxs = [];
-    headers.forEach((h, i) => {
-      if (i === idIdx || i === nameIdx) return;
-      const ym = parseHeaderToYm(h, defY);
-      if (ym) monthColIdxs.push({ i, ym });
-    });
-
-    const out = [];
-    if (monthColIdxs.length) {
-      for (let li = 1; li < lines.length; li += 1) {
-        const cells = lines[li].split(sep).map((c) => c.trim().replace(/^"|"$/g, ''));
-        const rawId = cells[idIdx];
-        if (rawId == null || rawId === '') continue;
-        const employeeId = Number(String(rawId).replace(/\D/g, '') || rawId);
-        if (Number.isNaN(employeeId)) continue;
-        const name = nameIdx >= 0 ? cells[nameIdx] : '';
-        monthColIdxs.forEach(({ i, ym }) => {
-          const v = parseFloat(String(cells[i] || '').replace(/,/g, ''));
-          if (!Number.isNaN(v) && v >= 0) out.push({ employeeId, name, ym, avgDailyHours: v });
-        });
-      }
-      return out;
+  function normalizeDate(val) {
+    if (val instanceof Date && !Number.isNaN(val.getTime())) return val.toISOString().slice(0, 10);
+    const s = String(val || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    if (/^\d{4}\/\d{1,2}\/\d{1,2}/.test(s)) {
+      const parts = s.split('/');
+      return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
     }
-
-    const mi = headers.findIndex((h) => isMonthCol(h));
-    const hi = headers.findIndex((h) => isHoursCol(h));
-    if (mi < 0 || hi < 0) return [];
-    for (let li = 1; li < lines.length; li += 1) {
-      const cells = lines[li].split(sep).map((c) => c.trim().replace(/^"|"$/g, ''));
-      const rawId = cells[idIdx];
-      if (rawId == null || rawId === '') continue;
-      const employeeId = Number(String(rawId).replace(/\D/g, '') || rawId);
-      if (Number.isNaN(employeeId)) continue;
-      const name = nameIdx >= 0 ? cells[nameIdx] : '';
-      const ym = normalizeYmCell(cells[mi], defY);
-      const v = parseFloat(String(cells[hi] || '').replace(/,/g, ''));
-      if (!ym || Number.isNaN(v) || v < 0) continue;
-      out.push({ employeeId, name, ym, avgDailyHours: v });
+    if (typeof val === 'number' && val > 20000) {
+      const utc = Math.round((val - 25569) * 86400 * 1000);
+      const d = new Date(utc);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
     }
-    return out;
+    return s;
   }
 
-  function parseAvgHoursJson(text) {
-    const arr = JSON.parse(text);
-    if (!Array.isArray(arr)) return [];
-    const out = [];
-    const defY = new Date().getFullYear();
-    arr.forEach((o) => {
-      if (!o || typeof o !== 'object') return;
-      const employeeId = Number(o.employeeId ?? o['Staff ID'] ?? o.工号);
-      if (Number.isNaN(employeeId)) return;
-      const name = o.name ?? o['Display Name'] ?? o.姓名 ?? '';
-      if (o.ym && o.avgDailyHours != null) {
-        const ym = normalizeYmCell(o.ym, defY);
-        const v = Number(o.avgDailyHours);
-        if (ym && !Number.isNaN(v) && v >= 0) out.push({ employeeId, name, ym, avgDailyHours: v });
-        return;
-      }
-      Object.keys(o).forEach((k) => {
-        const ym = parseHeaderToYm(k, defY);
-        if (!ym) return;
-        const v = Number(o[k]);
-        if (!Number.isNaN(v) && v >= 0) out.push({ employeeId, name, ym, avgDailyHours: v });
-      });
-    });
-    return out;
+  function normalizeTime(val) {
+    const s = String(val || '').trim();
+    const m = s.match(/(\d{1,2}):(\d{2})(?::\d{2})?/);
+    if (m) return `${m[1].padStart(2,'0')}:${m[2]}`;
+    if (typeof val === 'number' && val >= 0 && val < 1) {
+      const totalMins = Math.round(val * 24 * 60);
+      return `${String(Math.floor(totalMins / 60)).padStart(2,'0')}:${String(totalMins % 60).padStart(2,'0')}`;
+    }
+    return s;
   }
 
   window.TM.HrbpAttendance = {
     name: 'HrbpAttendance',
+    components: { FieldMapDialog: window.TM.FieldMapDialog },
     template: `
     <div class="page-stack">
+      <FieldMapDialog
+        :visible="fmapVisible"
+        :mapping="fmapMapping"
+        :fileHeaders="fmapHeaders"
+        :title="fmapTitle"
+        @confirm="fmapOnConfirm"
+        @cancel="fmapVisible = false"
+      />
       <div class="card pad org-scope-bar">
         <div class="org-scope-row">
           <label class="field inline org-scope-select">
@@ -200,593 +91,593 @@
         </div>
       </div>
 
-      <section class="card pad">
-        <h3 class="section-title">Attendance & working-time rules</h3>
-        <p class="muted small">Standard day length = end time − start time. Imported <strong>average daily hours</strong> are compared to that standard to derive load ratio and band (using the limits below).</p>
-        <form class="form-grid" @submit.prevent="saveRules">
-          <label class="field"><span>Work start</span><input v-model="rules.workStart" type="time" required /></label>
-          <label class="field"><span>Work end</span><input v-model="rules.workEnd" type="time" required /></label>
-          <label class="field"><span>Standard working days per month</span><input v-model.number="rules.monthlyStandardDays" type="number" min="1" max="31" step="1" required /></label>
-          <label class="field"><span>Load ratio lower bound (below = under-loaded)</span><input v-model.number="rules.loadBandLow" type="number" min="0.5" max="1" step="0.01" required /></label>
-          <label class="field"><span>Load ratio upper bound (above = over-loaded)</span><input v-model.number="rules.loadBandHigh" type="number" min="1" max="2" step="0.01" required /></label>
-          <label class="field full"><span>Leave types (English keys, comma-separated)</span>
-            <input v-model="leaveTypesStr" />
-          </label>
-          <button type="submit" class="btn btn-primary">Save rules & recalculate</button>
-        </form>
-        <p class="muted small load-legend">
-          <span class="tag load-under">Under-loaded</span> daily hours clearly below the standard day;
-          <span class="tag load-normal">Normal</span> between the bounds;
-          <span class="tag load-over">Over-loaded</span> daily hours clearly above the standard day.
-        </p>
-      </section>
-
-      <section class="card pad">
-        <h3 class="section-title">Import monthly average hours</h3>
-        <p class="muted small">Columns: <strong>Staff ID</strong>, <strong>Name</strong> (optional, for checks), and <strong>per-month average daily hours</strong> (hours/day). Supports <strong>wide</strong> sheets (one column per month, e.g. 2025-01) or <strong>long</strong> format (Staff ID, Name, Month, Avg hours). Multiple months in one import are split automatically.</p>
-        <div class="toolbar wrap">
-          <label class="btn btn-primary file-label">
-            Choose file & import
-            <input type="file" accept=".csv,.txt,.json,text/csv,application/json" class="hidden-file" @change="onFile" />
-          </label>
-          <button type="button" class="btn btn-secondary" @click="downloadTemplate">Download CSV template (wide)</button>
+      <div class="card pad">
+        <h2 class="section-title">考勤分析</h2>
+        <div class="recruit-tabs">
+          <button type="button" :class="['btn','btn-sm', tab==='overview' ? 'btn-primary':'btn-ghost']" @click="tab='overview'"><i class="fa-solid fa-building"></i> 概览 & 团队</button>
+          <button type="button" :class="['btn','btn-sm', tab==='employee' ? 'btn-primary':'btn-ghost']" @click="tab='employee'"><i class="fa-solid fa-user"></i> 员工视图</button>
         </div>
-        <p class="muted small">JSON arrays are also accepted, e.g. <code>{ "employeeId": 1005, "2025-01": 9.2, "2025-02": 8.8 }</code> or <code>{ "ym":"2025-01", "avgDailyHours": 9 }</code> with the same staff id field names as in CSV.</p>
-      </section>
+      </div>
 
-      <section class="card pad">
-        <h3 class="section-title">Employee engagement (hours)</h3>
-        <p class="muted small">Based on imported <strong>average daily hours</strong>; view by month, quarter average, or year average (months without data are skipped).</p>
-        <div class="toolbar wrap" style="align-items:flex-end">
-          <label class="field inline"><span>Employee</span>
-            <select v-model.number="engEmpId" class="input">
-              <option v-for="e in scopedActiveEmployees" :key="e.id" :value="e.id">{{ e.name }} ({{ e.id }})</option>
-            </select>
-          </label>
-          <label class="field inline"><span>Period</span>
-            <select v-model="engPeriod" class="input">
-              <option value="month">Single month</option>
-              <option value="quarter">Quarter average</option>
-              <option value="year">Year average</option>
-            </select>
-          </label>
-          <label v-if="engPeriod === 'month'" class="field inline"><span>Month</span>
-            <select v-model="engMonth" class="input"><option v-for="m in monthOptions" :key="m" :value="m">{{ m }}</option></select>
-          </label>
-          <template v-if="engPeriod === 'quarter'">
-            <label class="field inline"><span>Year</span>
-              <select v-model.number="engQYear" class="input"><option v-for="y in yearOptions" :key="'qy'+y" :value="y">{{ y }}</option></select>
+      <!-- ══════════ OVERVIEW + TEAM TAB ══════════ -->
+      <div v-show="tab==='overview'" class="page-stack-inner">
+        <div class="card pad">
+          <h3 class="section-title">数据上传</h3>
+          <p class="muted small" style="margin-bottom:8px">上传考勤系统导出的原始打卡 Excel 文件。系统自动识别字段（工号、日期、打卡时间），计算每天出勤时长 = 当天最后一次打卡 − 第一次打卡。</p>
+          <div class="toolbar wrap" style="gap:8px">
+            <label v-if="auth.hasPermission('att.import')" class="btn btn-primary btn-sm file-label">
+              <i class="fa-solid fa-upload"></i> 上传打卡数据 (Excel/CSV)
+              <input type="file" accept=".xlsx,.xls,.csv" class="hidden-file" @change="onUpload" />
             </label>
-            <label class="field inline"><span>Quarter</span>
-              <select v-model.number="engQuarter" class="input">
-                <option :value="1">Q1</option><option :value="2">Q2</option><option :value="3">Q3</option><option :value="4">Q4</option>
+            <button type="button" class="btn btn-ghost btn-sm" @click="downloadTemplate"><i class="fa-solid fa-download"></i> 下载模板</button>
+            <span class="muted small" style="margin-left:8px">当前共 <strong>{{ punchCount }}</strong> 条打卡记录，覆盖 <strong>{{ punchEmpCount }}</strong> 名员工</span>
+          </div>
+        </div>
+
+        <div class="att-summary-cards">
+          <div class="att-card">
+            <div class="att-card-label">数据范围</div>
+            <div class="att-card-value">{{ dataRange }}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-card-label">覆盖员工</div>
+            <div class="att-card-value">{{ punchEmpCount }} 人</div>
+          </div>
+          <div class="att-card">
+            <div class="att-card-label">上月平均出勤</div>
+            <div class="att-card-value" :class="hoursClass(overviewMonthAvg)">{{ overviewMonthAvg != null ? overviewMonthAvg + ' h' : '—' }}</div>
+          </div>
+          <div class="att-card">
+            <div class="att-card-label">过去6个月平均</div>
+            <div class="att-card-value" :class="hoursClass(overview6mAvg)">{{ overview6mAvg != null ? overview6mAvg + ' h' : '—' }}</div>
+          </div>
+        </div>
+
+        <!-- Color legend -->
+        <div class="card pad" style="padding-top:8px;padding-bottom:8px">
+          <span class="muted small" style="margin-right:8px">色阶：</span>
+          <span class="tag hours-t5">≥11h</span>
+          <span class="tag hours-t4">10.5-11h</span>
+          <span class="tag" style="border:1px solid #cbd5e1">10-10.5h</span>
+          <span class="tag hours-t2">9.5-10h</span>
+          <span class="tag hours-t1">&lt;9.5h</span>
+        </div>
+
+        <!-- Team drill-down -->
+        <div class="card pad">
+          <h3 class="section-title">团队出勤分析</h3>
+          <div class="att-breadcrumb">
+            <button type="button" class="att-bc-item" :class="{ active: !teamDrillStack.length }" @click="teamDrillReset">
+              <i class="fa-solid fa-building"></i> {{ productLineName }}
+            </button>
+            <template v-for="(bc, i) in teamDrillStack" :key="bc.id">
+              <span class="att-bc-sep">›</span>
+              <button type="button" class="att-bc-item" :class="{ active: i === teamDrillStack.length - 1 }" @click="teamDrillTo(i)">{{ bc.name }}</button>
+            </template>
+          </div>
+          <div class="toolbar wrap" style="margin-top:8px;gap:8px">
+            <label class="field inline"><span>排序</span>
+              <select v-model="teamSortKey" class="input input-sm" style="min-width:100px">
+                <option value="month">当月</option>
+                <option value="threeMonth">过去3个月</option>
+                <option value="sixMonth">过去6个月</option>
               </select>
             </label>
-          </template>
-          <label v-if="engPeriod === 'year'" class="field inline"><span>Year</span>
-            <select v-model.number="engYearOnly" class="input"><option v-for="y in yearOptions" :key="'ey'+y" :value="y">{{ y }}</option></select>
-          </label>
+            <button type="button" class="btn btn-ghost btn-sm" @click="teamSortDir = teamSortDir === 'desc' ? 'asc' : 'desc'">
+              {{ teamSortDir === 'desc' ? '↓ 降序' : '↑ 升序' }}
+            </button>
+          </div>
         </div>
-        <p v-if="engEmpResult != null"><strong>Avg daily hours (selected period)</strong>: {{ engEmpResult }} h/day</p>
-        <p v-else class="muted small">No imported data for the selected period.</p>
-        <div ref="engChartRef" class="chart-box short"></div>
-      </section>
 
-      <section class="card pad">
-        <h3 class="section-title">Team engagement (hours)</h3>
-        <p class="muted small">For the selected team (including sub-departments), <strong>mean</strong> daily hours: average each person’s months with data in the period, then average across people who have data.</p>
-        <div class="toolbar wrap" style="align-items:flex-end">
-          <label class="field inline"><span>Team</span>
-            <select v-model.number="teamDeptId" class="input">
-              <option :value="0">All in scope</option>
-              <option v-for="d in teamDeptOptions" :key="d.id" :value="d.id">{{ d.name }}</option>
-            </select>
-          </label>
-          <label class="field inline"><span>Period</span>
-            <select v-model="teamPeriod" class="input">
-              <option value="month">Single month</option>
-              <option value="quarter">Quarter average</option>
-              <option value="year">Year average</option>
-            </select>
-          </label>
-          <label v-if="teamPeriod === 'month'" class="field inline"><span>Month</span>
-            <select v-model="teamMonth" class="input"><option v-for="m in monthOptions" :key="'tm'+m" :value="m">{{ m }}</option></select>
-          </label>
-          <template v-if="teamPeriod === 'quarter'">
-            <label class="field inline"><span>Year</span>
-              <select v-model.number="teamQYear" class="input"><option v-for="y in yearOptions" :key="'tqy'+y" :value="y">{{ y }}</option></select>
-            </label>
-            <label class="field inline"><span>Quarter</span>
-              <select v-model.number="teamQuarter" class="input">
-                <option :value="1">Q1</option><option :value="2">Q2</option><option :value="3">Q3</option><option :value="4">Q4</option>
+        <div class="card pad">
+          <div class="table-card att-table-scroll">
+          <table class="data-table compact att-team-table">
+            <thead>
+              <tr>
+                <th style="text-align:left">名称</th><th>类型</th>
+                <th class="att-sort-th" @click="teamSortKey='month'">当月 <span v-if="teamSortKey==='month'">{{ teamSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+                <th class="att-sort-th" @click="teamSortKey='threeMonth'">过去3个月 <span v-if="teamSortKey==='threeMonth'">{{ teamSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+                <th class="att-sort-th" @click="teamSortKey='sixMonth'">过去6个月 <span v-if="teamSortKey==='sixMonth'">{{ teamSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+                <th>Leader</th><th>Leader 当月</th><th>Leader 6个月</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in teamRowsSorted" :key="row.key"
+                :class="{ 'att-row-dept': row.type === 'dept', 'att-row-emp': row.type === 'emp' }"
+                @click="row.type === 'dept' ? drillIntoDept(row) : null"
+                :style="row.type === 'dept' ? 'cursor:pointer' : ''">
+                <td style="text-align:left;font-weight:600">
+                  <i v-if="row.type === 'dept'" class="fa-solid fa-folder-open" style="margin-right:4px;color:#64748b"></i>
+                  <i v-else class="fa-solid fa-user" style="margin-right:4px;color:#94a3b8"></i>
+                  {{ row.name }}
+                </td>
+                <td class="muted small">{{ row.type === 'dept' ? '部门' : '员工' }}</td>
+                <td :class="hoursClass(row.month)">{{ row.month != null ? row.month : '—' }}</td>
+                <td :class="hoursClass(row.threeMonth)">{{ row.threeMonth != null ? row.threeMonth : '—' }}</td>
+                <td :class="hoursClass(row.sixMonth)">{{ row.sixMonth != null ? row.sixMonth : '—' }}</td>
+                <td v-if="row.type === 'dept'" class="muted small">{{ row.leaderName || '—' }}</td>
+                <td v-if="row.type === 'dept'" :class="hoursClass(row.leaderMonth)">{{ row.leaderMonth != null ? row.leaderMonth : '—' }}</td>
+                <td v-if="row.type === 'dept'" :class="hoursClass(row.leader6m)">{{ row.leader6m != null ? row.leader6m : '—' }}</td>
+                <td v-if="row.type === 'emp'" colspan="3"></td>
+              </tr>
+              <tr v-if="!teamRowsSorted.length"><td colspan="8" class="muted small" style="text-align:center;padding:1.5rem">暂无数据</td></tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════════ EMPLOYEE VIEW TAB ══════════ -->
+      <div v-show="tab==='employee'" class="page-stack-inner">
+        <div class="card pad">
+          <h3 class="section-title">员工出勤分析</h3>
+          <p class="muted small" style="margin-bottom:4px">截止上月最后一天。日均出勤 = 所有打卡天数的出勤时长平均值。</p>
+          <div style="margin-bottom:8px">
+            <span class="tag hours-t5">≥11h</span>
+            <span class="tag hours-t4">10.5-11h</span>
+            <span class="tag" style="border:1px solid #cbd5e1">10-10.5h</span>
+            <span class="tag hours-t2">9.5-10h</span>
+            <span class="tag hours-t1">&lt;9.5h</span>
+          </div>
+          <div class="toolbar wrap" style="gap:8px">
+            <label class="field inline"><span>排序</span>
+              <select v-model="empSortKey" class="input input-sm" style="min-width:100px">
+                <option value="month">当月</option>
+                <option value="threeMonth">过去3个月</option>
+                <option value="sixMonth">过去6个月</option>
               </select>
             </label>
-          </template>
-          <label v-if="teamPeriod === 'year'" class="field inline"><span>Year</span>
-            <select v-model.number="teamYearOnly" class="input"><option v-for="y in yearOptions" :key="'ty'+y" :value="y">{{ y }}</option></select>
-          </label>
+            <button type="button" class="btn btn-ghost btn-sm" @click="empSortDir = empSortDir === 'desc' ? 'asc' : 'desc'">
+              {{ empSortDir === 'desc' ? '↓ 降序' : '↑ 升序' }}
+            </button>
+          </div>
         </div>
-        <p v-if="teamEngResult != null"><strong>Team mean daily hours</strong>: {{ teamEngResult }} h/day ({{ teamSampleCount }} with data)</p>
-        <p v-else class="muted small">No imported data for this team and period.</p>
-        <div ref="teamChartRef" class="chart-box short"></div>
-      </section>
-
-      <section class="card pad">
-        <h3 class="section-title">Load summary</h3>
-        <div class="toolbar inline">
-          <select v-model="month" class="input" @change="onMonthChange">
-            <option v-for="m in monthOptions" :key="m" :value="m">{{ m }}</option>
-          </select>
-          <button v-if="hasPunchInMonth" type="button" class="btn btn-ghost btn-sm" @click="recompute">Recalculate from punches</button>
+        <div class="card pad">
+          <div class="table-card att-table-scroll">
+          <table class="data-table compact att-emp-table">
+            <thead>
+              <tr>
+                <th>姓名</th><th>部门</th><th>职级</th>
+                <th class="att-sort-th" @click="empSortKey='month'">当月 <span v-if="empSortKey==='month'">{{ empSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+                <th class="att-sort-th" @click="empSortKey='threeMonth'">过去3个月 <span v-if="empSortKey==='threeMonth'">{{ empSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+                <th class="att-sort-th" @click="empSortKey='sixMonth'">过去6个月 <span v-if="empSortKey==='sixMonth'">{{ empSortDir === 'desc' ? '↓' : '↑' }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in empRowsSorted" :key="row.id" class="att-emp-row" @click="selectEmpDetail(row.id)">
+                <td style="font-weight:600">{{ row.name }}</td>
+                <td>{{ row.dept }}</td>
+                <td><span v-if="row.rank" class="tag tag-level">{{ row.rank }}</span><span v-else class="muted">—</span></td>
+                <td :class="hoursClass(row.month)">{{ row.month != null ? row.month : '—' }}</td>
+                <td :class="hoursClass(row.threeMonth)">{{ row.threeMonth != null ? row.threeMonth : '—' }}</td>
+                <td :class="hoursClass(row.sixMonth)">{{ row.sixMonth != null ? row.sixMonth : '—' }}</td>
+              </tr>
+              <tr v-if="!empRowsSorted.length"><td colspan="6" class="muted small" style="text-align:center;padding:1.5rem">暂无打卡数据</td></tr>
+            </tbody>
+          </table>
+          </div>
         </div>
-        <p v-if="hasPunchInMonth" class="muted small">Punch data for this month will replace imported daily averages when you recalculate.</p>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Employee</th><th>Department</th><th>Avg daily (h)</th><th>Punch days</th><th>Std. days</th>
-              <th>Actual month hours (h)</th><th>Expected month hours (h)</th><th>Load ratio</th><th>Load band</th><th>Late count</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in summaryRows" :key="r.employeeId + '-' + r.month">
-              <td>{{ empName(r.employeeId) }}</td>
-              <td>{{ deptOfEmp(r.employeeId) }}</td>
-              <td>{{ displayAvgDaily(r) != null ? displayAvgDaily(r) : '—' }}</td>
-              <td>{{ r.presentDays != null ? r.presentDays : '—' }}</td>
-              <td>{{ r.workDays }}</td>
-              <td>{{ r.actualWorkHours != null ? r.actualWorkHours : '—' }}</td>
-              <td>{{ r.expectedMonthHours != null ? r.expectedMonthHours : '—' }}</td>
-              <td>{{ r.loadRatio != null ? r.loadRatio : '—' }}</td>
-              <td><span v-if="r.loadTier" :class="['tag', tierClass(r.loadTier)]">{{ tierLabel(r.loadTier) }}</span><span v-else class="muted">—</span></td>
-              <td>{{ r.lateCount != null ? r.lateCount : '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
 
-      <section class="card pad">
-        <h3 class="section-title">Leave / OT approvals</h3>
-        <table class="data-table">
-          <thead>
-            <tr><th>Employee</th><th>Type</th><th>Dates</th><th>Reason</th><th>Approver</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="l in leaveRowsScoped" :key="l.id">
-              <td>{{ empName(l.employeeId) }}</td>
-              <td>{{ typeLabel(l.type) }}</td>
-              <td>{{ l.startDate }} ~ {{ l.endDate }}</td>
-              <td class="cell-clip">{{ l.reason }}</td>
-              <td>{{ empName(l.approverId) }}</td>
-              <td><span class="tag" :data-st="l.status">{{ statusLabel(l.status) }}</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+        <div v-if="detailEmp" class="card pad">
+          <h4 class="section-title">{{ detailEmp.name }} · 每日出勤明细</h4>
+          <div class="pivot-filters" style="margin-bottom:8px">
+            <label class="pivot-filter-item">
+              <span>月份</span>
+              <select v-model="detailMonth" class="input input-sm">
+                <option v-for="m in detailMonthOptions" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="table-card att-table-scroll">
+          <table class="data-table compact">
+            <thead><tr><th>日期</th><th>首次打卡</th><th>末次打卡</th><th>出勤时长 (h)</th></tr></thead>
+            <tbody>
+              <tr v-for="d in detailDays" :key="d.date">
+                <td>{{ d.date }}</td><td>{{ d.firstIn }}</td><td>{{ d.lastOut }}</td>
+                <td :class="hoursClass(d.hours)">{{ d.hours != null ? d.hours : '—' }}</td>
+              </tr>
+              <tr v-if="!detailDays.length"><td colspan="4" class="muted small" style="text-align:center">该月无打卡记录</td></tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
     </div>
   `,
     setup() {
       const data = useDataStore();
+      const auth = window.TM.useAuthStore();
       const hrScope = useHrScopeStore();
+      const _orgScope = createOrgScopeBindings(data, hrScope);
       const {
         scopeDeptIds,
         scopeRootDeptUi,
         deptScopeOptions,
         scopeHint,
-        employeeInScope,
-      } = createOrgScopeBindings(data, hrScope);
-
-      const rules = ref({
-        workStart: '09:30',
-        workEnd: '18:30',
-        monthlyStandardDays: 20,
-        loadBandLow: 0.88,
-        loadBandHigh: 1.12,
-        leaveTypes: [],
-        labels: {},
-        ...data.attendanceRules,
-      });
-      const leaveTypesStr = ref((data.attendanceRules.leaveTypes || []).join(', '));
-
-      const leaveRowsScoped = computed(() =>
-        data.leaveRequests.filter((l) => {
-          const emp = data.employees.find((e) => e.id === l.employeeId);
-          return emp && employeeInScope(emp);
-        }),
-      );
-
-      const monthSet = computed(() => {
-        const s = new Set();
-        data.punchRecords.forEach((p) => {
-          if (p.date && p.date.length >= 7) s.add(p.date.slice(0, 7));
-        });
-        data.attendanceRecords.forEach((r) => {
-          if (r.month) s.add(r.month);
-        });
-        const arr = [...s].sort();
-        if (!arr.length) arr.push(new Date().toISOString().slice(0, 7));
-        return arr;
-      });
-
-      const month = ref(
-        data.attendanceRecords[0]?.month
-          || data.punchRecords[0]?.date?.slice(0, 7)
-          || monthSet.value[0],
-      );
-
-      const monthOptions = computed(() => {
-        const s = new Set(monthSet.value);
-        s.add(month.value);
-        return [...s].sort();
-      });
-
-      const yearOptions = computed(() => {
-        const ys = new Set();
-        monthSet.value.forEach((m) => ys.add(Number(m.slice(0, 4))));
-        const y0 = new Date().getFullYear();
-        [y0 - 1, y0, y0 + 1].forEach((y) => ys.add(y));
-        return [...ys].sort((a, b) => a - b);
-      });
-
-      const hasPunchInMonth = computed(() =>
-        data.punchRecords.some((p) => String(p.date).startsWith(month.value)),
-      );
-
-      const scopedActiveEmployees = computed(() =>
-        data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e)).sort((a, b) => a.id - b.id),
-      );
-
-      const teamDeptOptions = computed(() => {
-        const set = scopeDeptIds.value;
-        return data.departments.filter((d) => set == null || set.has(Number(d.id)));
-      });
-
-      const engEmpId = ref(null);
-      const engPeriod = ref('month');
-      const engMonth = ref(month.value);
-      const engQYear = ref(new Date().getFullYear());
-      const engQuarter = ref(1);
-      const engYearOnly = ref(new Date().getFullYear());
-
-      const teamDeptId = ref(0);
-      const teamPeriod = ref('month');
-      const teamMonth = ref(month.value);
-      const teamQYear = ref(new Date().getFullYear());
-      const teamQuarter = ref(1);
-      const teamYearOnly = ref(new Date().getFullYear());
-
-      watch(scopedActiveEmployees, (list) => {
-        if (!list.length) return;
-        if (engEmpId.value == null || !list.some((e) => e.id === engEmpId.value)) {
-          engEmpId.value = list[0].id;
-        }
-      }, { immediate: true });
-
-      watch(monthOptions, (opts) => {
-        if (!opts.includes(engMonth.value)) engMonth.value = opts[opts.length - 1];
-        if (!opts.includes(teamMonth.value)) teamMonth.value = opts[opts.length - 1];
-      }, { immediate: true });
-
-      function empIdsInTeamDept(deptId) {
-        let emps = scopedActiveEmployees.value;
-        if (deptId != null && deptId !== 0) {
-          const sub = collectChildDeptIds(deptId, data.departments);
-          emps = emps.filter((e) => sub.has(Number(e.departmentId)));
-        }
-        return emps.map((e) => e.id);
+      } = _orgScope;
+      const _zs = window.TM.useZoneScope(data);
+      function employeeInScope(emp) {
+        if (!_zs.employeeInTeam(emp)) return false;
+        return _orgScope.employeeInScope(emp);
       }
 
-      const engMonthsList = computed(() => {
-        if (engPeriod.value === 'month') return periodMonths('month', engMonth.value, null, null);
-        if (engPeriod.value === 'quarter') return periodMonths('quarter', null, engQYear.value, engQuarter.value);
-        return periodMonths('year', null, engYearOnly.value, null);
-      });
+      const tab = ref('overview');
 
-      const engEmpResult = computed(() => {
-        if (engEmpId.value == null) return null;
-        return employeePeriodAvgDaily(data, engEmpId.value, engMonthsList.value);
-      });
+      const monthList = computed(() => att.periodMonths('month'));
+      const threeMonthList = computed(() => att.periodMonths('3month'));
+      const sixMonthList = computed(() => att.periodMonths('6month'));
 
-      const teamMonthsList = computed(() => {
-        if (teamPeriod.value === 'month') return periodMonths('month', teamMonth.value, null, null);
-        if (teamPeriod.value === 'quarter') return periodMonths('quarter', null, teamQYear.value, teamQuarter.value);
-        return periodMonths('year', null, teamYearOnly.value, null);
-      });
+      const activeEmps = computed(() =>
+        data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e)),
+      );
 
-      const teamEngStats = computed(() => {
-        const ids = empIdsInTeamDept(teamDeptId.value);
-        const per = [];
-        ids.forEach((eid) => {
-          const a = employeePeriodAvgDaily(data, eid, teamMonthsList.value);
-          if (a != null) per.push(a);
+      /* ── Field mapper state ── */
+      const fmapVisible = ref(false);
+      const fmapMapping = ref([]);
+      const fmapHeaders = ref([]);
+      const fmapTitle = ref('考勤打卡数据 — 字段映射确认');
+      let fmapPendingJson = null;
+
+      function fmapOnConfirm(confirmedMapping) {
+        fmapVisible.value = false;
+        if (fmapPendingJson) commitPunchImport(fmapPendingJson, confirmedMapping);
+        fmapPendingJson = null;
+      }
+
+      /* ── Upload ── */
+      function onUpload(ev) {
+        const file = ev.target.files?.[0]; ev.target.value = ''; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const XL = ensureXLSX();
+            let json;
+            if (/\.csv$/i.test(file.name)) {
+              const wb = XL.read(String(reader.result), { type: 'string' });
+              json = XL.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+            } else {
+              const wb = XL.read(reader.result, { type: 'array', cellDates: true });
+              json = XL.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+            }
+            if (!json || !json.length) { toast('文件为空', 'error'); return; }
+            const headers = Object.keys(json[0]);
+            const mapping = window.TM.fieldMapper.match(PUNCH_SCHEMA, headers);
+            const allExact = mapping.every((m) => !m.header || m.confidence === 'exact');
+            if (allExact && mapping.filter((m) => m.header).length >= 2) {
+              commitPunchImport(json, mapping);
+            } else {
+              fmapPendingJson = json;
+              fmapHeaders.value = headers;
+              fmapMapping.value = mapping;
+              fmapVisible.value = true;
+            }
+          } catch (e) { toast('导入失败: ' + e.message, 'error'); }
+        };
+        if (/\.csv$/i.test(file.name)) reader.readAsText(file, 'UTF-8'); else reader.readAsArrayBuffer(file);
+      }
+
+      function commitPunchImport(json, mapping) {
+        const headerToField = {};
+        mapping.forEach((m) => { if (m.header) headerToField[m.header] = m.fieldKey; });
+        const hasDateCol = Object.values(headerToField).includes('date');
+        const hasTimeCol = Object.values(headerToField).includes('time');
+
+        const empIdMap = new Map();
+        data.employees.forEach((e) => {
+          if (e.staffId) empIdMap.set(String(e.staffId).trim(), e.id);
+          empIdMap.set(String(e.id), e.id);
         });
-        const mean = per.length
-          ? Math.round((per.reduce((x, y) => x + y, 0) / per.length) * 100) / 100
-          : null;
-        return { mean, n: per.length };
+
+        const rows = [];
+        json.forEach((raw) => {
+          let eid = null;
+          let dateVal = '';
+          let timeVal = '';
+
+          Object.keys(raw).forEach((h) => {
+            const fk = headerToField[h];
+            if (!fk) return;
+            if (fk === 'employeeId') {
+              const v = String(raw[h] || '').trim().replace(/\D/g, '');
+              eid = empIdMap.get(v) || empIdMap.get(String(raw[h]).trim()) || Number(v) || null;
+            }
+            if (fk === 'date') dateVal = raw[h];
+            if (fk === 'time') timeVal = raw[h];
+          });
+
+          if (!eid) return;
+
+          if (!hasTimeCol && hasDateCol) {
+            const sp = splitDatetime(dateVal);
+            if (sp) { dateVal = sp.date; timeVal = sp.time; }
+          }
+          if (!hasDateCol && !hasTimeCol) {
+            Object.keys(raw).forEach((h) => {
+              const sp = splitDatetime(raw[h]);
+              if (sp && !dateVal) { dateVal = sp.date; timeVal = sp.time; }
+            });
+          }
+
+          const d = normalizeDate(dateVal);
+          const t = normalizeTime(timeVal);
+          if (!d || !t) return;
+          rows.push({ employeeId: eid, date: d, time: t });
+        });
+
+        if (!rows.length) { toast('未解析到有效打卡记录，请检查文件格式', 'error'); return; }
+        data.importRawPunches(rows, { replace: true });
+        toast(`已导入 ${rows.length} 条打卡记录（覆盖模式）`, 'success');
+      }
+
+      function downloadTemplate() {
+        try {
+          const XL = ensureXLSX();
+          const wb = XL.utils.book_new();
+          const ws = XL.utils.aoa_to_sheet([
+            ['工号', '日期', '打卡时间'],
+            [1005, '2026-03-01', '09:02'],
+            [1005, '2026-03-01', '18:35'],
+            [1005, '2026-03-02', '08:58'],
+            [1005, '2026-03-02', '19:10'],
+            [1006, '2026-03-01', '09:15'],
+            [1006, '2026-03-01', '18:20'],
+          ]);
+          XL.utils.book_append_sheet(wb, ws, 'Punch');
+          XL.writeFile(wb, 'punch_template.xlsx');
+        } catch (e) { toast(e.message, 'error'); }
+      }
+
+      function toast(msg, type) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type } }));
+      }
+
+      function empHours(eid, months) {
+        return att.empAvgHours(data._attIdx, eid, months);
+      }
+
+      /* ── Punch index: compute once, reuse everywhere ── */
+      const punchStats = computed(() => {
+        const punches = data.punchRecords || [];
+        const empSet = new Set();
+        let minDate = null, maxDate = null;
+        const byEmp = new Map();
+        punches.forEach((p) => {
+          const eid = Number(p.employeeId);
+          empSet.add(eid);
+          const d = String(p.date || '').trim();
+          if (d.length >= 7) {
+            if (!minDate || d < minDate) minDate = d;
+            if (!maxDate || d > maxDate) maxDate = d;
+          }
+          if (!byEmp.has(eid)) byEmp.set(eid, []);
+          byEmp.get(eid).push(p);
+        });
+        return { count: punches.length, empCount: empSet.size, minDate, maxDate, byEmp };
       });
 
-      const teamEngResult = computed(() => teamEngStats.value.mean);
-      const teamSampleCount = computed(() => teamEngStats.value.n);
+      /* ── Overview stats ── */
+      const punchCount = computed(() => punchStats.value.count);
+      const punchEmpCount = computed(() => punchStats.value.empCount);
+      const dataRange = computed(() => {
+        const { minDate, maxDate } = punchStats.value;
+        if (!minDate) return '—';
+        return minDate.slice(0, 7) + ' ~ ' + maxDate.slice(0, 7);
+      });
+      const overviewMonthAvg = computed(() => {
+        let total = 0, count = 0;
+        activeEmps.value.forEach((e) => {
+          const v = empHours(e.id, monthList.value);
+          if (v != null) { total += v; count++; }
+        });
+        return count ? Math.round((total / count) * 10) / 10 : null;
+      });
+      const overview6mAvg = computed(() => {
+        let total = 0, count = 0;
+        activeEmps.value.forEach((e) => {
+          const v = empHours(e.id, sixMonthList.value);
+          if (v != null) { total += v; count++; }
+        });
+        return count ? Math.round((total / count) * 10) / 10 : null;
+      });
 
-      const summaryRows = computed(() => {
-        const emps = data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e));
-        return emps.map((emp) => {
-          const r = data.attendanceRecords.find((x) => x.employeeId === emp.id && x.month === month.value);
-          if (r) return r;
+      /* ── Employee view ── */
+      const empSortKey = ref('sixMonth');
+      const empSortDir = ref('desc');
+
+      const empRows = computed(() => {
+        const dMap = data._deptMap;
+        const pMap = data._posMap;
+        return activeEmps.value.map((e) => {
+          const dept = dMap.get(e.departmentId);
+          const pos = pMap.get(e.positionId);
           return {
-            employeeId: emp.id,
-            month: month.value,
-            workDays: rules.value.monthlyStandardDays || 20,
-            presentDays: null,
-            actualWorkHours: null,
-            expectedMonthHours: null,
-            loadRatio: null,
-            loadTier: null,
-            lateCount: null,
-            avgDailyHours: null,
+            id: e.id,
+            name: e.name || e.displayName || String(e.id),
+            dept: dept?.name || '—',
+            rank: pos?.level || e.rank || '',
+            month: empHours(e.id, monthList.value),
+            threeMonth: empHours(e.id, threeMonthList.value),
+            sixMonth: empHours(e.id, sixMonthList.value),
           };
         });
       });
 
-      const engChartRef = ref(null);
-      const teamChartRef = ref(null);
-      let engChartInst;
-      let teamChartInst;
-
-      async function drawEngChart() {
-        const echarts = await loadEcharts();
-        if (!engChartRef.value || engEmpId.value == null) return;
-        if (!engChartInst) engChartInst = echarts.init(engChartRef.value);
-        const months = engMonthsList.value;
-        const vals = months.map((ym) => getRecordAvgDaily(data, engEmpId.value, ym));
-        const hasAny = vals.some((v) => v != null);
-        if (!hasAny) {
-          engChartInst.setOption({
-            title: { text: 'No data', left: 'center', top: 'center', textStyle: { color: '#94a3b8', fontSize: 13 } },
-            xAxis: { show: false },
-            yAxis: { show: false },
-            series: [],
-          });
-          return;
-        }
-        engChartInst.setOption({
-          title: { show: false },
-          tooltip: { trigger: 'axis' },
-          xAxis: { type: 'category', data: months, axisLabel: { color: '#64748b' } },
-          yAxis: { type: 'value', name: 'h/day', splitLine: { lineStyle: { type: 'dashed' } } },
-          series: [{
-            type: 'line',
-            smooth: true,
-            data: vals.map((v) => (v == null ? null : v)),
-            connectNulls: false,
-            itemStyle: { color: '#6366f1' },
-          }],
-        });
-      }
-
-      async function drawTeamChart() {
-        const echarts = await loadEcharts();
-        if (!teamChartRef.value) return;
-        if (!teamChartInst) teamChartInst = echarts.init(teamChartRef.value);
-        const months = teamMonthsList.value;
-        const ids = empIdsInTeamDept(teamDeptId.value);
-        const seriesData = months.map((ym) => teamMeanPeriodAvgDaily(data, ids, [ym]));
-        const hasAny = seriesData.some((v) => v != null);
-        if (!hasAny) {
-          teamChartInst.setOption({
-            title: { text: 'No data', left: 'center', top: 'center', textStyle: { color: '#94a3b8', fontSize: 13 } },
-            xAxis: { show: false },
-            yAxis: { show: false },
-            series: [],
-          });
-          return;
-        }
-        teamChartInst.setOption({
-          title: { show: false },
-          tooltip: { trigger: 'axis' },
-          xAxis: { type: 'category', data: months, axisLabel: { color: '#64748b' } },
-          yAxis: { type: 'value', name: 'Mean h/day', splitLine: { lineStyle: { type: 'dashed' } } },
-          series: [{
-            type: 'bar',
-            data: seriesData.map((v) => (v == null ? null : v)),
-            itemStyle: { color: '#0ea5e9', borderRadius: [4, 4, 0, 0] },
-          }],
-        });
-      }
-
-      watch([
-        () => data.attendanceRecords.length,
-        engEmpId,
-        engPeriod,
-        engMonth,
-        engQYear,
-        engQuarter,
-        engYearOnly,
-        teamDeptId,
-        teamPeriod,
-        teamMonth,
-        teamQYear,
-        teamQuarter,
-        teamYearOnly,
-      ], () => {
-        drawEngChart();
-        drawTeamChart();
-      }, { deep: true });
-
-      function displayAvgDaily(r) {
-        if (r.avgDailyHours != null && !Number.isNaN(Number(r.avgDailyHours))) {
-          return Math.round(Number(r.avgDailyHours) * 100) / 100;
-        }
-        if (r.presentDays > 0 && r.actualWorkHours != null) {
-          return Math.round((r.actualWorkHours / r.presentDays) * 100) / 100;
-        }
-        return null;
-      }
-
-      function empName(id) {
-        return data.employees.find((e) => e.id === id)?.name || id;
-      }
-      function deptOfEmp(eid) {
-        const e = data.employees.find((x) => x.id === eid);
-        if (!e) return '-';
-        return data.departments.find((d) => d.id === e.departmentId)?.name || '-';
-      }
-      function typeLabel(t) {
-        return data.attendanceRules.labels?.[t] || t;
-      }
-      function statusLabel(s) {
-        return { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' }[s] || s;
-      }
-      function tierLabel(t) {
-        return { under: 'Under-loaded', normal: 'Normal', over: 'Over-loaded' }[t] || t;
-      }
-      function tierClass(t) {
-        return { under: 'load-under', normal: 'load-normal', over: 'load-over' }[t] || '';
-      }
-
-      function recompute() {
-        data.recomputeAttendanceFromPunches(month.value);
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Recalculated from punches: ' + month.value, type: 'success' } }));
-      }
-
-      function onMonthChange() {
-        if (hasPunchInMonth.value) {
-          data.recomputeAttendanceFromPunches(month.value);
-        }
-      }
-
-      function saveRules() {
-        const types = leaveTypesStr.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-        const labels = { ...rules.value.labels };
-        types.forEach((t) => { if (!labels[t]) labels[t] = t; });
-        data.saveAttendanceRules({
-          workStart: rules.value.workStart,
-          workEnd: rules.value.workEnd,
-          monthlyStandardDays: rules.value.monthlyStandardDays,
-          loadBandLow: rules.value.loadBandLow,
-          loadBandHigh: rules.value.loadBandHigh,
-          leaveTypes: types,
-          labels,
-        });
-        rules.value = { ...rules.value, ...data.attendanceRules };
-        leaveTypesStr.value = (data.attendanceRules.leaveTypes || []).join(', ');
-        data.refreshImportedAttendanceMetrics();
-        if (data.punchRecords.some((p) => String(p.date).startsWith(month.value))) {
-          data.recomputeAttendanceFromPunches(month.value);
-        }
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Rules saved', type: 'success' } }));
-      }
-
-      function downloadTemplate() {
-        const csv = '\uFEFFStaff ID,Name,2025-01,2025-02,2025-03\n1005,Sample,9.2,9.0,8.8\n1006,Sample 2,8.5,8.6,\n';
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'monthly_avg_hours_template.csv';
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
-
-      function onFile(ev) {
-        const file = ev.target.files?.[0];
-        ev.target.value = '';
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-          try {
-            let rows = [];
-            const text = reader.result;
-            if (file.name.endsWith('.json') || text.trim().startsWith('[')) {
-              rows = parseAvgHoursJson(text);
-            } else {
-              rows = parseAvgHoursTable(text);
-            }
-            if (!rows.length) throw new Error('No valid rows (need staff ID + month + average hours)');
-            const set = scopeDeptIds.value;
-            let nameMismatch = 0;
-            const filtered = rows.filter((row) => {
-              const eid = Number(row.employeeId);
-              const emp = data.employees.find((e) => e.id === eid);
-              if (!emp) return false;
-              if (set != null && !set.has(Number(emp.departmentId))) return false;
-              if (row.name && String(emp.name).trim() !== String(row.name).trim()) nameMismatch += 1;
-              return true;
-            });
-            if (!filtered.length) throw new Error('No valid rows: staff ID missing or out of org scope');
-            data.importAttendanceAvgDailyHours(filtered);
-            const yms = [...new Set(filtered.map((r) => r.ym))].sort();
-            if (yms.length) month.value = yms[yms.length - 1];
-            let msg = `Wrote ${filtered.length} employee-month average-hour row(s)`;
-            if (nameMismatch) msg += ` (${nameMismatch} name mismatch vs roster; imported by staff ID)`;
-            window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'success' } }));
-          } catch (err) {
-            window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Import failed: ' + err.message, type: 'error' } }));
-          }
-        };
-        reader.readAsText(file, 'UTF-8');
-      }
-
-      onMounted(() => {
-        rules.value = { ...rules.value, ...data.attendanceRules };
-        if (!rules.value.monthlyStandardDays) rules.value.monthlyStandardDays = 20;
-        if (rules.value.loadBandLow == null) rules.value.loadBandLow = 0.88;
-        if (rules.value.loadBandHigh == null) rules.value.loadBandHigh = 1.12;
-        if (data.punchRecords.some((p) => String(p.date).startsWith(month.value))) {
-          data.recomputeAttendanceFromPunches(month.value);
-        }
-        drawEngChart();
-        drawTeamChart();
-        window.addEventListener('resize', () => {
-          engChartInst?.resize();
-          teamChartInst?.resize();
+      const empRowsSorted = computed(() => {
+        const key = empSortKey.value;
+        const dir = empSortDir.value === 'desc' ? -1 : 1;
+        return [...empRows.value].sort((a, b) => {
+          const va = a[key] ?? -999, vb = b[key] ?? -999;
+          return (va - vb) * dir;
         });
       });
 
+      /* ── Employee detail ── */
+      const detailEmpId = ref(null);
+      const detailEmp = computed(() => {
+        if (detailEmpId.value == null) return null;
+        return data._empMap.get(detailEmpId.value) || null;
+      });
+
+      const detailMonthOptions = computed(() => {
+        if (!detailEmpId.value) return [];
+        const recs = punchStats.value.byEmp.get(Number(detailEmpId.value)) || [];
+        const s = new Set();
+        recs.forEach((p) => {
+          if (p.date && p.date.length >= 7) s.add(p.date.slice(0, 7));
+        });
+        return [...s].sort().reverse();
+      });
+
+      const detailMonth = ref('');
+      watch(detailMonthOptions, (opts) => {
+        if (opts.length && !opts.includes(detailMonth.value)) detailMonth.value = opts[0];
+      });
+
+      function selectEmpDetail(eid) {
+        detailEmpId.value = eid;
+        const opts = detailMonthOptions.value;
+        if (opts.length) detailMonth.value = opts[0];
+      }
+
+      const detailDays = computed(() => {
+        if (!detailEmpId.value || !detailMonth.value) return [];
+        const eid = Number(detailEmpId.value);
+        const prefix = detailMonth.value;
+        const empPunches = punchStats.value.byEmp.get(eid) || [];
+        const byDate = {};
+        empPunches.forEach((p) => {
+          const d = String(p.date || '').trim();
+          if (!d.startsWith(prefix)) return;
+          if (!byDate[d]) byDate[d] = [];
+          byDate[d].push(p);
+        });
+        return Object.keys(byDate).sort().map((date) => {
+          const punches = byDate[date];
+          const mins = punches.map((p) => att.parsePunchTime(p.time)).filter((m) => !Number.isNaN(m));
+          if (mins.length < 2) {
+            const only = mins.length === 1;
+            const t = only ? punches[0].time : '—';
+            return { date, firstIn: t, lastOut: only ? t : '—', hours: null };
+          }
+          const first = Math.min(...mins);
+          const last = Math.max(...mins);
+          const fH = String(Math.floor(first / 60)).padStart(2, '0') + ':' + String(first % 60).padStart(2, '0');
+          const lH = String(Math.floor(last / 60)).padStart(2, '0') + ':' + String(last % 60).padStart(2, '0');
+          const hours = Math.round(((last - first) / 60) * 10) / 10;
+          return { date, firstIn: fH, lastOut: lH, hours: hours > 0 ? hours : null };
+        });
+      });
+
+      /* ── Team view with drill-down ── */
+      const productLineName = computed(() => {
+        const ls = window.TM.useProductLineStore?.();
+        return ls?.currentLine?.name || '产品线';
+      });
+
+      const teamDrillStack = ref([]);
+      const teamSortKey = ref('sixMonth');
+      const teamSortDir = ref('desc');
+
+      function teamDrillReset() { teamDrillStack.value = []; }
+      function teamDrillTo(index) { teamDrillStack.value = teamDrillStack.value.slice(0, index + 1); }
+      function drillIntoDept(row) {
+        if (row.type !== 'dept') return;
+        teamDrillStack.value = [...teamDrillStack.value, { id: row.deptId, name: row.name }];
+      }
+
+      function deptAvg(deptIds, months) {
+        const idx = data._attIdx;
+        const monthSet = new Set(months);
+        const emps = activeEmps.value.filter((e) => deptIds.has(Number(e.departmentId)));
+        let totalH = 0, totalD = 0;
+        emps.forEach((e) => {
+          const recs = idx.get(e.id) || [];
+          recs.forEach((r) => {
+            if (monthSet.has(r.month) && r.avgDailyHours != null && r.workDays > 0) {
+              totalH += r.avgDailyHours * r.workDays;
+              totalD += r.workDays;
+            }
+          });
+        });
+        return totalD > 0 ? Math.round((totalH / totalD) * 10) / 10 : null;
+      }
+
+      const teamRows = computed(() => {
+        const stack = teamDrillStack.value;
+        const currentDeptId = stack.length ? stack[stack.length - 1].id : null;
+
+        let childDepts;
+        if (currentDeptId == null) {
+          const scopeSet = scopeDeptIds.value;
+          childDepts = data.departments.filter((d) => {
+            if (scopeSet != null && !scopeSet.has(Number(d.id))) return false;
+            return d.parentId == null || d.parentId === 0;
+          });
+        } else {
+          childDepts = data.departments.filter((d) => Number(d.parentId) === Number(currentDeptId));
+        }
+
+        const rows = [];
+
+        if (childDepts.length > 0) {
+          childDepts.forEach((d) => {
+            const allIds = collectChildDeptIds(d.id, data.departments);
+            const leader = d.managerId ? data._empMap.get(d.managerId) : null;
+            rows.push({
+              key: 'dept-' + d.id,
+              type: 'dept',
+              deptId: d.id,
+              name: d.name,
+              month: deptAvg(allIds, monthList.value),
+              threeMonth: deptAvg(allIds, threeMonthList.value),
+              sixMonth: deptAvg(allIds, sixMonthList.value),
+              leaderName: leader?.name || '',
+              leaderMonth: leader ? empHours(leader.id, monthList.value) : null,
+              leader6m: leader ? empHours(leader.id, sixMonthList.value) : null,
+            });
+          });
+        }
+
+        if (currentDeptId != null) {
+          const directEmps = activeEmps.value.filter((e) => Number(e.departmentId) === Number(currentDeptId));
+          directEmps.forEach((e) => {
+            rows.push({
+              key: 'emp-' + e.id,
+              type: 'emp',
+              name: e.name || String(e.id),
+              month: empHours(e.id, monthList.value),
+              threeMonth: empHours(e.id, threeMonthList.value),
+              sixMonth: empHours(e.id, sixMonthList.value),
+            });
+          });
+        }
+
+        return rows;
+      });
+
+      const teamRowsSorted = computed(() => {
+        const key = teamSortKey.value;
+        const dir = teamSortDir.value === 'desc' ? -1 : 1;
+        const depts = teamRows.value.filter((r) => r.type === 'dept');
+        const emps = teamRows.value.filter((r) => r.type === 'emp');
+        depts.sort((a, b) => ((a[key] ?? -999) - (b[key] ?? -999)) * dir);
+        emps.sort((a, b) => ((a[key] ?? -999) - (b[key] ?? -999)) * dir);
+        return [...depts, ...emps];
+      });
+
+      function hoursClass(val) { return att.hoursClass(val); }
+
       return {
-        data,
-        rules,
-        leaveTypesStr,
-        month,
-        monthOptions,
-        yearOptions,
-        hasPunchInMonth,
-        scopeDeptIds,
-        scopeRootDeptUi,
-        deptScopeOptions,
-        scopeHint,
-        summaryRows,
-        leaveRowsScoped,
-        scopedActiveEmployees,
-        teamDeptOptions,
-        engEmpId,
-        engPeriod,
-        engMonth,
-        engQYear,
-        engQuarter,
-        engYearOnly,
-        engEmpResult,
-        engChartRef,
-        teamDeptId,
-        teamPeriod,
-        teamMonth,
-        teamQYear,
-        teamQuarter,
-        teamYearOnly,
-        teamEngResult,
-        teamSampleCount,
-        teamChartRef,
-        empName,
-        deptOfEmp,
-        typeLabel,
-        statusLabel,
-        tierLabel,
-        tierClass,
-        displayAvgDaily,
-        saveRules,
-        downloadTemplate,
-        onFile,
-        recompute,
-        onMonthChange,
+        auth, data, tab,
+        scopeRootDeptUi, deptScopeOptions, scopeHint,
+        fmapVisible, fmapMapping, fmapHeaders, fmapTitle, fmapOnConfirm,
+        onUpload, downloadTemplate,
+        punchCount, punchEmpCount, dataRange, overviewMonthAvg, overview6mAvg,
+        empRows, empRowsSorted, empSortKey, empSortDir,
+        selectEmpDetail, detailEmp, detailMonth, detailMonthOptions, detailDays,
+        productLineName, teamDrillStack, teamDrillReset, teamDrillTo, drillIntoDept,
+        teamRows, teamRowsSorted, teamSortKey, teamSortDir,
+        hoursClass,
       };
     },
   };

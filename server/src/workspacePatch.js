@@ -56,7 +56,14 @@ function applyPatchToWorkspace(workspace, patch) {
     }
   });
   if (patch.users) {
-    next.users = applyIdCollectionPatch(next.users, patch.users, 'id');
+    const sanitizedUsers = { ...patch.users };
+    if (Array.isArray(sanitizedUsers.upsert)) {
+      sanitizedUsers.upsert = sanitizedUsers.upsert.map((u) => {
+        const { password, ...rest } = u;
+        return rest;
+      });
+    }
+    next.users = applyIdCollectionPatch(next.users, sanitizedUsers, 'id');
   }
   return next;
 }

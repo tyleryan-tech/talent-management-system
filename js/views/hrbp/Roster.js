@@ -1,5 +1,5 @@
 (function () {
-  const { computed, ref, reactive } = Vue;
+  const { computed, ref, reactive, watch } = Vue;
   const useDataStore = window.TM.useDataStore;
   const useProductLineStore = window.TM.useProductLineStore;
   const useAuthStore = window.TM.useAuthStore;
@@ -236,9 +236,9 @@ function perfStatusEn(s) {
         <div class="toolbar roster-toolbar-actions">
           <input v-model.trim="q" type="search" class="input search" placeholder="Search name, email, mobile…" />
           <button v-if="hasActiveFilters" type="button" class="btn btn-ghost btn-sm" @click="clearRosterFilters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
-          <button type="button" class="btn btn-primary" @click="openCreate">Add employee</button>
+          <button v-if="auth.hasPermission('roster.add')" type="button" class="btn btn-primary" @click="openCreate">Add employee</button>
           <button v-if="auth.isHrbp" type="button" class="btn btn-danger" :disabled="!selectedIds.length" @click="batchDeleteEmployees">Delete selected</button>
-          <button type="button" class="btn btn-secondary" @click="exportExcel">Export Excel</button>
+          <button v-if="auth.hasPermission('roster.export')" type="button" class="btn btn-secondary" @click="exportExcel">Export Excel</button>
           <button type="button" class="btn btn-ghost btn-sm" @click="downloadExcelTemplate">Download import template</button>
           <div class="col-picker-wrap">
             <button type="button" :class="['btn btn-ghost btn-sm', showColPicker ? 'btn-active' : '']" @click.stop="showColPicker = !showColPicker" title="Show/hide columns and adjust order">
@@ -276,7 +276,7 @@ function perfStatusEn(s) {
             Append Excel
             <input type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden-file" @change="appendImportExcel" />
           </label>
-          <label class="btn btn-ghost file-label" title="Replace entire roster with all rows in the file (unlike Append)">
+          <label v-if="auth.hasPermission('roster.import')" class="btn btn-ghost file-label" title="Replace entire roster with all rows in the file (unlike Append)">
             Replace import Excel
             <input type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden-file" @change="importExcel" />
           </label>
@@ -372,13 +372,16 @@ function perfStatusEn(s) {
                   <button type="button" class="linklike" @click="openDetail(e)">{{ e.name }}</button>
                 </template>
                 <template v-else-if="col.key === 'performance'">
-                  <button type="button" class="linklike" @click="openDetail(e)">{{ perfSummaryText(e.id) }}</button>
+                  <span class="perf-grade-inline" v-html="perfGradesHtml(e.id)"></span>
+                </template>
+                <template v-else-if="col.key === 'avgHours6m'">
+                  <span :class="rosterHoursClass(e.id)">{{ rosterTextCell(col.key, e) }}</span>
                 </template>
                 <template v-else>{{ rosterTextCell(col.key, e) }}</template>
               </td>
               <td class="row-actions">
-                <button type="button" class="btn-link" @click="openEdit(e)">Edit</button>
-                <button v-if="e.status !== 'leave'" type="button" class="btn-link danger" @click="doLeave(e)">Mark Leaving</button>
+                <button v-if="auth.hasPermission('roster.edit')" type="button" class="btn-link" @click="openEdit(e)">Edit</button>
+                <button v-if="e.status !== 'leave' && auth.hasPermission('roster.leave')" type="button" class="btn-link danger" @click="doLeave(e)">Mark Leaving</button>
               </td>
             </tr>
           </tbody>
@@ -467,19 +470,23 @@ function perfStatusEn(s) {
           <div class="kv-grid">
             <div v-for="(v,k) in detailRows" :key="k"><span class="muted">{{ k }}</span><div>{{ v }}</div></div>
           </div>
-          <h4 class="subsection-title">Performance (all)</h4>
-          <p v-if="!detailReviews.length" class="muted small">No performance records</p>
+          <h4 class="subsection-title">绩效记录</h4>
+          <div v-if="detailReviews.length" style="margin-bottom:8px">
+            <span class="muted small">历次绩效: </span>
+            <span class="perf-grade-inline" v-html="perfGradesHtml(detail.id)" style="font-size:0.95rem"></span>
+          </div>
+          <p v-if="!detailReviews.length" class="muted small">暂无绩效记录</p>
           <div v-else class="roster-perf-wrap">
             <table class="data-table compact roster-perf-table">
-              <thead><tr><th>Cycle</th><th>Final grade</th><th>RM initial</th><th>Status</th><th>RM</th><th>Notes</th></tr></thead>
+              <thead><tr><th>周期</th><th>类型</th><th>最终等级</th><th>RM 评级</th><th>状态</th><th>RM</th></tr></thead>
               <tbody>
                 <tr v-for="r in detailReviews" :key="r.id">
                   <td>{{ reviewCycleLabel(r) }}</td>
-                  <td>{{ r.status === 'finalized' ? (r.finalGrade || '—') : '—' }}</td>
+                  <td>{{ reviewCycleType(r) }}</td>
+                  <td><strong>{{ (r.status === 'finalized' || r.status === 'calibrated') ? (r.finalGrade || '—') : '—' }}</strong></td>
                   <td>{{ r.rmInitialGrade || '—' }}</td>
                   <td>{{ perfStatusEn(r.status) }}</td>
                   <td>{{ mgrName(r.reviewerId) }}</td>
-                  <td class="cell-clip">{{ rosterReviewNote(r) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -537,7 +544,14 @@ function perfStatusEn(s) {
     const data = useDataStore();
     const productLine = useProductLineStore();
     const auth = useAuthStore();
+    const zs = window.TM.useZoneScope(data);
     const q = ref('');
+    const debouncedQ = ref('');
+    let _qTimer = null;
+    watch(q, (v) => {
+      if (_qTimer) clearTimeout(_qTimer);
+      _qTimer = setTimeout(() => { debouncedQ.value = v; }, 300);
+    });
     const colFilters = reactive({});
     const modal = ref(false);
     const modalMode = ref('create');
@@ -662,8 +676,13 @@ function perfStatusEn(s) {
       return Array.from(set).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
     });
 
+    const _tmMap = computed(() => {
+      const m = new Map();
+      (data.talentMatrix || []).forEach((x) => m.set(Number(x.employeeId), x));
+      return m;
+    });
     function potentialCodeForEmployee(eid) {
-      const m = data.talentMatrix.find((x) => Number(x.employeeId) === Number(eid));
+      const m = _tmMap.value.get(Number(eid));
       if (!m) return null;
       const p = String(m.potential || '').trim().toUpperCase();
       if (p === 'H' || p === 'M' || p === 'L') return p;
@@ -671,7 +690,7 @@ function perfStatusEn(s) {
     }
 
     const filtered = computed(() => {
-      let list = [...data.employees];
+      let list = [...zs.scopedEmployees.value];
       Object.entries(colFilters).forEach(([key, val]) => {
         if (val === '' || val == null) return;
         const ft = colFilterType(key);
@@ -697,8 +716,8 @@ function perfStatusEn(s) {
           list = list.filter((e) => String(rosterTextCell(key, e) ?? '').toLowerCase().includes(s));
         }
       });
-      if (q.value) {
-        const s = q.value.toLowerCase();
+      if (debouncedQ.value) {
+        const s = debouncedQ.value.toLowerCase();
         list = list.filter((e) =>
           [
             e.name, e.email, e.phone, String(e.id), e.gradSchool, e.managementPlan,
@@ -791,20 +810,26 @@ function perfStatusEn(s) {
     function reviewCycleLabel(r) {
       return window.TM.reviewCycleLabel(data, r);
     }
+    function reviewCycleType(r) {
+      const c = window.TM.reviewCycleRecord(data, r);
+      return c ? (window.TM.PERF_CYCLE_TYPE_LABEL[c.cycleType] || '半年绩效') : '—';
+    }
     function rosterReviewNote(r) {
       const parts = [r.outputDescription, r.historyPerformance, r.comments].filter(Boolean);
       return parts.length ? parts.join('; ') : '—';
     }
     function reviewsForEmployee(eid) {
-      return [...data.performanceReviews]
-        .filter((r) => Number(r.employeeId) === Number(eid))
+      return [...(data._reviewsByEmp.get(Number(eid)) || [])]
         .sort((a, b) => window.TM.reviewSortStamp(data, b).localeCompare(window.TM.reviewSortStamp(data, a)));
     }
 
     function perfSummaryText(eid) {
-      const rev = reviewsForEmployee(eid);
-      if (!rev.length) return '—';
-      return `${rev.length} record(s) — open for all`;
+      return window.TM.allGradesPlainText(reviewsForEmployee(eid), data.performanceCycles);
+    }
+
+    function perfGradesHtml(eid) {
+      const html = window.TM.allGradesForDisplay(reviewsForEmployee(eid), data.performanceCycles);
+      return html || '—';
     }
 
     const detailReviews = computed(() => {
@@ -813,18 +838,18 @@ function perfStatusEn(s) {
     });
 
     function deptName(id) {
-      return data.departments.find((d) => d.id === id)?.name || '-';
+      return data._deptMap.get(id)?.name || '-';
     }
     function posName(id) {
-      return data.positions.find((p) => p.id === id)?.name || '-';
+      return data._posMap.get(id)?.name || '-';
     }
     function mgrName(id) {
       if (id == null) return '-';
-      return data.employees.find((e) => e.id === id)?.name || id;
+      return data._empMap.get(id)?.name || id;
     }
 
     function posLevel(pid) {
-      return data.positions.find((p) => p.id === pid)?.level || '—';
+      return data._posMap.get(pid)?.level || '—';
     }
 
     function companyTenureLabel(e) {
@@ -846,6 +871,14 @@ function perfStatusEn(s) {
 
     function fieldDefLabel(key) {
       return window.TM.rosterFieldByKey[key]?.defaultLabel || key;
+    }
+
+    function rosterHoursClass(eid) {
+      const a = window.TM.attendance;
+      if (!a) return '';
+      const months = a.periodMonths('6month');
+      const v = a.empAvgHours(data._attIdx, eid, months);
+      return a.hoursClass(v);
     }
 
     function rosterTdClass(key) {
@@ -890,6 +923,13 @@ function perfStatusEn(s) {
         case 'mobile': return e.phone || '—';
         case 'email': return e.email || '—';
         case 'statusLabel': return statusMap[e.status] || '—';
+        case 'avgHours6m': {
+          const att = window.TM.attendance;
+          if (!att) return '—';
+          const months = att.periodMonths('6month');
+          const v = att.empAvgHours(data._attIdx, e.id, months);
+          return v != null ? v : '—';
+        }
         default: return '—';
       }
     }
@@ -940,6 +980,7 @@ function perfStatusEn(s) {
         case 'mobile': return e.phone;
         case 'email': return e.email;
         case 'performance': return perfSummaryText(e.id);
+        case 'performanceHtml': return perfGradesHtml(e.id);
         default: return '';
       }
     }
@@ -1130,7 +1171,7 @@ function perfStatusEn(s) {
       try {
         const XLSX = ensureXLSX();
         const cols = exportColumnsResolved();
-        const rows = [...data.employees].sort((a, b) => a.id - b.id).map((e) => {
+        const rows = [...zs.scopedEmployees.value].sort((a, b) => a.id - b.id).map((e) => {
           const row = {};
           cols.forEach((col) => {
             row[col.labelResolved] = exportCellValue(col.key, e);
@@ -1299,9 +1340,43 @@ function perfStatusEn(s) {
 
     function runAfterRosterImport(listLen) {
       auth.enrichCurrentUserFromEmployee();
-      window.dispatchEvent(new CustomEvent('tm-toast', {
-        detail: { message: `Processed ${listLen} employee(s); 9-box and modules are in sync`, type: 'success' },
-      }));
+      var newRMCount = detectAndCreateRMAccounts();
+      var msg = `Processed ${listLen} employee(s); 9-box and modules are in sync`;
+      if (newRMCount > 0) msg += `。发现 ${newRMCount} 名新 RM，已创建待审批账号`;
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'success' } }));
+    }
+
+    function detectAndCreateRMAccounts() {
+      var mgrIds = new Set();
+      (data.employees || []).forEach(function (e) {
+        if (e.managerId) mgrIds.add(Number(e.managerId));
+      });
+      var existingEmpIds = new Set();
+      (data.users || []).forEach(function (u) { if (u.employeeId != null) existingEmpIds.add(Number(u.employeeId)); });
+      var maxId = (data.users || []).reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
+      var count = 0;
+      mgrIds.forEach(function (eid) {
+        if (existingEmpIds.has(eid)) return;
+        var emp = data.employees.find(function (e) { return e.id === eid; });
+        if (!emp) return;
+        maxId++;
+        var email = emp.email || (String(emp.name || 'rm').toLowerCase().replace(/\s+/g, '') + '@company.com');
+        data.users.push({
+          id: maxId,
+          username: email.split('@')[0],
+          email: email,
+          password: '123',
+          realName: emp.name,
+          role: 'manager',
+          employeeId: eid,
+          rmStatus: 'pending_approval',
+          rmNominationSource: '花名册导入识别',
+          managerPermissions: { modules: window.TM.MGR_MODULES.slice(), ops: window.TM.RM_ALL_OPS_ON() },
+        });
+        count++;
+      });
+      if (count > 0) { data._markDirty('users'); data.persistAll(); }
+      return count;
     }
 
     /* ── Field Map Dialog state for Roster ── */
@@ -1368,6 +1443,7 @@ function perfStatusEn(s) {
         } else {
           data.employees = list;
           data.syncEmployeeLinkedDataFromRoster();
+          data._markDirty('employees');
         }
         matrixPatches.forEach(({ id, pot }) => {
           const perf = data.talentMatrix.find((x) => Number(x.employeeId) === Number(id))?.performance || 'B';
@@ -1389,11 +1465,11 @@ function perfStatusEn(s) {
       selectedIds, selectedSet, allFilteredSelected, toggleSelectRow, toggleSelectAllFiltered, batchDeleteEmployees,
       levelFilterOptions, filtered, statusMap, clearRosterFilters,
       deptName, posName, posLevel, mgrName, tenureHuman, companyTenureLabel, levelTenureLabel, potentialDisplay,
-      teamPathForDept, displayAge, orgRoleDisplay, salaryBandDisplay, perfSummaryText, perfStatusEn, reviewCycleLabel, rosterReviewNote,
+      teamPathForDept, displayAge, orgRoleDisplay, salaryBandDisplay, perfSummaryText, perfGradesHtml, perfStatusEn, reviewCycleLabel, reviewCycleType, rosterReviewNote,
       modal, modalMode, form, positionsInDept,
       openCreate, openEdit, saveEmployee, doLeave, openDetail, detail, detailRows, detailReviews,
       exportExcel, importExcel, appendImportExcel, downloadExcelTemplate,
-      visibleRosterColumns, allRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle,
+      visibleRosterColumns, allRosterColumns, rosterTextCell, rosterTdClass, rosterTdStyle, rosterCellTitle, rosterHoursClass,
       colFilterType, hasActiveFilters,
       showColPicker, quickHideColumn, quickMoveColumn, toggleColumnVisibility, showAllColumns, resetColumnSettingsDefault,
       fieldEditorOpen, fieldEditorRows, layoutPreview,

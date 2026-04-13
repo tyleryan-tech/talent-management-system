@@ -171,33 +171,63 @@
   function buildOverviewAuto(data) {
     const tags = data.positionRecruitTags || {};
     const pipeline = data.recruitmentPipeline || [];
+    const posMap = data._posMap;
+    const deptMap = data._deptMap;
+
     const groupMap = {};
+    function ensureGroup(team, position, level, priority) {
+      const gk = `${team}||${position}||${level}||${priority}`;
+      if (!groupMap[gk]) groupMap[gk] = { team, position, level, priority, reqHC: 0 };
+      return groupMap[gk];
+    }
+
     Object.keys(tags).forEach((key) => {
       const m = key.match(/^(\d+)-(\d+)$/);
       if (!m) return;
       const deptId = Number(m[1]);
       const positionId = Number(m[2]);
-      const p = data.positions.find((x) => x.id === positionId && x.departmentId === deptId);
-      if (!p) return;
-      const assignees = data.employees.filter((e) => e.positionId === positionId && e.departmentId === deptId && e.status !== 'leave');
-      if (assignees.length > 0) return;
+      const p = posMap.get(positionId);
+      if (!p || p.departmentId !== deptId) return;
       const priority = data.getPositionRecruitPriority(deptId, positionId) || 'medium';
-      const deptName = data.departments.find((d) => d.id === deptId)?.name || '—';
-      const gk = `${deptName}||${p.name}||${p.level || '—'}||${priority}`;
-      if (!groupMap[gk]) groupMap[gk] = { team: deptName, position: p.name, level: p.level || '—', priority, reqHC: 0 };
-      groupMap[gk].reqHC += 1;
+      const deptName = deptMap.get(deptId)?.name || '—';
+      ensureGroup(deptName, p.name, p.level || '—', priority).reqHC += 1;
     });
+
+    const pipeByKey = new Map();
+    pipeline.forEach((c) => {
+      const team = String(c.team || '').trim().toLowerCase();
+      const pos = String(c.position || '').trim().toLowerCase();
+      const pk = `${team}||${pos}`;
+      if (!pipeByKey.has(pk)) pipeByKey.set(pk, []);
+      pipeByKey.get(pk).push(c);
+    });
+
+    const existingTeamPos = new Set();
+    Object.values(groupMap).forEach((g) => {
+      existingTeamPos.add(`${g.team.toLowerCase()}||${g.position.toLowerCase()}`);
+    });
+    pipeline.forEach((c) => {
+      const team = String(c.team || '').trim();
+      const pos = String(c.position || '').trim();
+      if (!team || !pos) return;
+      const tpKey = `${team.toLowerCase()}||${pos.toLowerCase()}`;
+      if (existingTeamPos.has(tpKey)) return;
+      existingTeamPos.add(tpKey);
+      const gk = `${team}||${pos}||—||medium`;
+      groupMap[gk] = { team, position: pos, level: '—', priority: 'medium', reqHC: 0 };
+    });
+
     const rows = Object.values(groupMap);
     rows.sort((a, b) => {
-      const d = RECRUIT_ORDER[a.priority] - RECRUIT_ORDER[b.priority];
+      const d = (RECRUIT_ORDER[a.priority] ?? 9) - (RECRUIT_ORDER[b.priority] ?? 9);
       return d !== 0 ? d : `${a.team}${a.position}`.localeCompare(`${b.team}${b.position}`, 'zh-Hans-CN');
     });
-    rows.forEach((row) => {
-      const cands = pipeline.filter((c) => {
-        const mp = String(c.position || '').trim().toLowerCase() === String(row.position || '').trim().toLowerCase();
-        const mt = !c.team || String(c.team || '').trim().toLowerCase() === String(row.team || '').trim().toLowerCase();
-        return mp && mt;
-      });
+
+    function fillPipeStats(row) {
+      const teamKey = String(row.team || '').trim().toLowerCase();
+      const posKey = String(row.position || '').trim().toLowerCase();
+      const pk = `${teamKey}||${posKey}`;
+      const cands = pipeByKey.get(pk) || [];
       const sts = cands.map((c) => candStatus(c));
       row.cvPassTotal = cands.filter((c) => candHrPassed(c)).length;
       row.cvPending = sts.filter((s) => s === 'cvPending').length;
@@ -219,7 +249,9 @@
       row.rejScore3Pct = declined.length ? Math.round((row.rejScore3 / declined.length) * 100) + '%' : '—';
       row.rejScore4 = declined.filter((c) => Number(c.score) >= 4).length;
       row.rejScore4Pct = declined.length ? Math.round((row.rejScore4 / declined.length) * 100) + '%' : '—';
-    });
+    }
+    rows.forEach(fillPipeStats);
+
     const t = { team: 'Current Progress', position: '', level: '', priority: '' };
     t.reqHC = rows.reduce((a, r) => a + r.reqHC, 0);
     ['cvPassTotal','cvPending','interviewing','inOffer','pendingOnboard','onboarded','rejected','offerDeclined','offerAccepted','accScore3','accScore4','rejScore3','rejScore4'].forEach((k) => { t[k] = rows.reduce((a, r) => a + (r[k] || 0), 0); });
@@ -331,7 +363,7 @@
       <!-- ══════════ OVERVIEW TAB ══════════ -->
       <div v-show="tab === 'overview'" class="card pad">
         <h3 class="section-title">Overview — Auto <span class="muted small" style="font-weight:400;margin-left:8px">实时从 Organization 招聘需求 + Pipeline 候选人自动汇总</span></h3>
-        <p v-if="!overviewData.rows.length" class="muted small">暂无招聘需求。请先在 <strong>Organization</strong> 模块将空编 Target HC 标记为 Open。</p>
+        <p v-if="!overviewData.rows.length" class="muted small">暂无数据。请先在 <strong>Organization</strong> 模块创建招聘需求，或在 <strong>Candidate Pipeline</strong> 中添加候选人。</p>
         <div v-else class="table-card ov-scroll">
           <table class="ov-table">
             <thead>
@@ -391,15 +423,15 @@
       <div v-show="tab === 'pipeline'" class="page-stack-inner">
         <div class="card pad">
           <div class="toolbar wrap" style="gap:8px">
-            <button type="button" class="btn btn-primary btn-sm" @click="addPipeRow"><i class="fa-solid fa-plus"></i> Add candidate</button>
-            <button type="button" class="btn btn-danger btn-sm" :disabled="!pipeSelected.size" @click="deletePipeRows">Delete selected ({{ pipeSelected.size }})</button>
+            <button v-if="auth.hasPermission('recruit.add')" type="button" class="btn btn-primary btn-sm" @click="addPipeRow"><i class="fa-solid fa-plus"></i> Add candidate</button>
+            <button v-if="auth.hasPermission('recruit.delete')" type="button" class="btn btn-danger btn-sm" :disabled="!pipeSelected.size" @click="deletePipeRows">Delete selected ({{ pipeSelected.size }})</button>
             <div style="flex:1"></div>
             <button type="button" class="btn btn-secondary btn-sm" @click="downloadPipeTemplate"><i class="fa-solid fa-download"></i> Download template</button>
-            <label class="btn btn-ghost btn-sm file-label">
+            <label v-if="auth.hasPermission('recruit.import')" class="btn btn-ghost btn-sm file-label">
               <i class="fa-solid fa-upload"></i> Upload Excel (replace)
               <input type="file" accept=".xlsx,.xls,.csv" class="hidden-file" @change="uploadPipeline" />
             </label>
-            <button type="button" class="btn btn-ghost btn-sm" @click="exportPipeline"><i class="fa-solid fa-file-export"></i> Export Excel</button>
+            <button v-if="auth.hasPermission('recruit.export')" type="button" class="btn btn-ghost btn-sm" @click="exportPipeline"><i class="fa-solid fa-file-export"></i> Export Excel</button>
           </div>
 
           <div class="pivot-filters" style="margin-top:8px">
@@ -498,7 +530,7 @@
                   </template>
                 </td>
                 <td class="pipe-td-act">
-                  <button type="button" class="btn-link danger" @click="removePipeRow(row.id)" title="Delete row">✕</button>
+                  <button v-if="auth.hasPermission('recruit.delete')" type="button" class="btn-link danger" @click="removePipeRow(row.id)" title="Delete row">✕</button>
                 </td>
               </tr>
               <tr v-if="!pipeFilteredRows.length">
@@ -616,7 +648,7 @@
           <h3 class="section-title">面试官池</h3>
           <p class="muted small" style="margin-bottom:10px">从花名册导入面试官，按工种和面试职级分类管理。面试官姓名可在 Pipeline 的 Interviewer 字段中关联。</p>
           <div class="toolbar wrap" style="gap:8px">
-            <button type="button" class="btn btn-primary btn-sm" @click="poolShowAdd = true"><i class="fa-solid fa-plus"></i> 添加面试官</button>
+            <button v-if="auth.hasPermission('recruit.pool')" type="button" class="btn btn-primary btn-sm" @click="poolShowAdd = true"><i class="fa-solid fa-plus"></i> 添加面试官</button>
           </div>
         </div>
 
@@ -733,8 +765,8 @@
                 <td>{{ row.interviewCount }}</td>
                 <td :class="row.interviewCount ? '' : 'muted'">{{ row.passRate }}</td>
                 <td>
-                  <button type="button" class="btn-link" @click="poolStartEdit(row)" title="编辑"><i class="fa-solid fa-pen"></i></button>
-                  <button type="button" class="btn-link danger" @click="poolRemove(row.id)" title="移除"><i class="fa-solid fa-trash"></i></button>
+                  <button v-if="auth.hasPermission('recruit.pool')" type="button" class="btn-link" @click="poolStartEdit(row)" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                  <button v-if="auth.hasPermission('recruit.pool')" type="button" class="btn-link danger" @click="poolRemove(row.id)" title="移除"><i class="fa-solid fa-trash"></i></button>
                 </td>
               </tr>
               <tr v-if="!poolFilteredRows.length">
@@ -748,18 +780,49 @@
   `,
     setup() {
       const data = useDataStore();
+      const auth = window.TM.useAuthStore();
+      const _zs = window.TM.useZoneScope(data);
       const tab = ref('overview');
 
       function priorityLabel(p) { return PRIORITY_EN[p] || p || '—'; }
       function recruitTypeLabel(v) { return RECRUIT_TYPE_LABELS[v] || '-'; }
 
       /* ── Overview ── */
-      const overviewData = computed(() => buildOverviewAuto(data));
+      const overviewData = computed(() => {
+        if (!_zs.isManagerZone.value) return buildOverviewAuto(data);
+        const proxy = Object.create(data);
+        const deptNames = _teamDeptNames.value;
+        const origTags = data.positionRecruitTags || {};
+        const filteredTags = {};
+        if (deptNames) {
+          Object.keys(origTags).forEach((key) => {
+            const m = key.match(/^(\d+)-(\d+)$/);
+            if (!m) return;
+            const deptId = Number(m[1]);
+            const d = data._deptMap.get(deptId);
+            if (d && deptNames.has(d.name)) filteredTags[key] = origTags[key];
+          });
+        }
+        proxy.positionRecruitTags = filteredTags;
+        const deptNameSet = deptNames || new Set();
+        proxy.recruitmentPipeline = (data.recruitmentPipeline || []).filter((r) => deptNameSet.has(String(r.team || '').trim()));
+        return buildOverviewAuto(proxy);
+      });
 
       /* ── Pipeline ── */
       const pipeCols = PIPE_COLS;
       const pipeGroups = PIPE_GROUPS;
-      const pipeAllRows = computed(() => data.recruitmentPipeline || []);
+      const _teamDeptNames = computed(() => {
+        if (!_zs.isManagerZone.value) return null;
+        const names = new Set();
+        _zs.scopedDepartments.value.forEach((d) => names.add(d.name));
+        return names;
+      });
+      const pipeAllRows = computed(() => {
+        const all = data.recruitmentPipeline || [];
+        if (!_teamDeptNames.value) return all;
+        return all.filter((r) => _teamDeptNames.value.has(String(r.team || '').trim()));
+      });
       const pipeSelected = reactive(new Set());
 
       /* Pipeline filters */
@@ -818,12 +881,14 @@
       function cycleRecruitType(current) { const idx = RECRUIT_TYPE_VALUES.indexOf(current || ''); return RECRUIT_TYPE_VALUES[(idx + 1) % RECRUIT_TYPE_VALUES.length]; }
 
       function onPipeCellClick(row, col) {
+        if (!auth.hasPermission('recruit.add')) return;
         if (col.type === 'stage') { row[col.key] = cycleStage(row[col.key]); savePipeline(); }
         else if (col.type === 'offer') { row[col.key] = cycleOffer(row[col.key]); savePipeline(); }
         else if (col.type === 'recruitType') { row[col.key] = cycleRecruitType(row[col.key]); savePipeline(); }
       }
 
       function onPipeCellDblClick(row, col, ev) {
+        if (!auth.hasPermission('recruit.add')) return;
         if (col.type === 'stage' || col.type === 'offer' || col.type === 'recruitType') return;
         editingCell.rowId = row.id;
         editingCell.key = col.key;
@@ -838,18 +903,19 @@
         row.recruitDate = new Date().toISOString().slice(0, 10);
         list.push(row);
         data.recruitmentPipeline = list;
+        data._markDirty('recruitmentPipeline');
         data.persistAll();
       }
-      function removePipeRow(id) { data.recruitmentPipeline = (data.recruitmentPipeline || []).filter((r) => r.id !== id); pipeSelected.delete(id); data.persistAll(); }
+      function removePipeRow(id) { data.recruitmentPipeline = (data.recruitmentPipeline || []).filter((r) => r.id !== id); pipeSelected.delete(id); data._markDirty('recruitmentPipeline'); data.persistAll(); }
       function deletePipeRows() {
         if (!pipeSelected.size) return;
         if (!confirm(`确认删除选中的 ${pipeSelected.size} 条候选人记录？`)) return;
         const ids = new Set(pipeSelected);
         data.recruitmentPipeline = (data.recruitmentPipeline || []).filter((r) => !ids.has(r.id));
-        pipeSelected.clear(); data.persistAll();
+        pipeSelected.clear(); data._markDirty('recruitmentPipeline'); data.persistAll();
       }
       function togglePipeSel(id) { if (pipeSelected.has(id)) pipeSelected.delete(id); else pipeSelected.add(id); }
-      function savePipeline() { data.recruitmentPipeline = [...(data.recruitmentPipeline || [])]; data.persistAll(); }
+      function savePipeline() { data.recruitmentPipeline = [...(data.recruitmentPipeline || [])]; data._markDirty('recruitmentPipeline'); data.persistAll(); }
 
       /* ── Field Map Dialog state ── */
       const fmapVisible = ref(false);
@@ -918,9 +984,16 @@
           });
           if (r.name) list.push(r);
         });
-        data.recruitmentPipeline = list;
+        if (_zs.isManagerZone.value && _teamDeptNames.value) {
+          const teamNames = _teamDeptNames.value;
+          const kept = (data.recruitmentPipeline || []).filter((r) => !teamNames.has(String(r.team || '').trim()));
+          data.recruitmentPipeline = kept.concat(list);
+        } else {
+          data.recruitmentPipeline = list;
+        }
+        data._markDirty('recruitmentPipeline');
         data.persistAll();
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `已导入 ${list.length} 条候选人（全量覆盖）`, type: 'success' } }));
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `已导入 ${list.length} 条候选人（${_zs.isManagerZone.value ? '团队范围覆盖' : '全量覆盖'}）`, type: 'success' } }));
       }
 
       function downloadPipeTemplate() {
@@ -934,7 +1007,7 @@
       function exportPipeline() {
         try {
           const XL = ensureXLSX(); const wb = XL.utils.book_new();
-          const rows = (data.recruitmentPipeline || []).map((r) => PIPE_COLS.map((c) => r[c.key] ?? ''));
+          const rows = pipeAllRows.value.map((r) => PIPE_COLS.map((c) => r[c.key] ?? ''));
           XL.utils.book_append_sheet(wb, XL.utils.aoa_to_sheet([PIPE_COLS.map((c) => c.label), ...rows]), 'Pipeline');
           XL.writeFile(wb, 'pipeline_export.xlsx');
           window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `Exported ${rows.length} rows`, type: 'success' } }));
@@ -948,7 +1021,11 @@
       const pivotRecruitType = ref('');
       const pivotInterviewer = ref('');
 
-      const allPipe = computed(() => data.recruitmentPipeline || []);
+      const allPipe = computed(() => {
+        const all = data.recruitmentPipeline || [];
+        if (!_teamDeptNames.value) return all;
+        return all.filter((r) => _teamDeptNames.value.has(String(r.team || '').trim()));
+      });
       const pivotTeamOptions = computed(() => collectUnique(allPipe.value, 'team'));
       const pivotRecruiterOptions = computed(() => collectUnique(allPipe.value, 'recruiter'));
       const pivotInterviewerOptions = computed(() => collectInterviewers(allPipe.value));
@@ -1035,22 +1112,21 @@
 
       const poolAvailableEmps = computed(() => {
         const ids = poolExistingEmpIds.value;
-        return (data.employees || [])
+        return (_zs.scopedEmployees.value || [])
           .filter((e) => e.status !== 'leave' && !ids.has(e.id))
           .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN'));
       });
 
       function poolEmpDept(e) {
-        const d = (data.departments || []).find((x) => x.id === e.departmentId);
-        return d ? d.name : '—';
+        return data._deptMap.get(e.departmentId)?.name || '—';
       }
       function poolEmpPos(e) {
-        const p = (data.positions || []).find((x) => x.id === e.positionId && x.departmentId === e.departmentId);
-        return p ? p.name : '—';
+        const p = data._posMap.get(e.positionId);
+        return (p && p.departmentId === e.departmentId) ? p.name : '—';
       }
       function poolEmpLevel(e) {
-        const p = (data.positions || []).find((x) => x.id === e.positionId && x.departmentId === e.departmentId);
-        return p ? (p.level || '—') : '—';
+        const p = data._posMap.get(e.positionId);
+        return (p && p.departmentId === e.departmentId) ? (p.level || '—') : '—';
       }
 
       function poolUid() {
@@ -1068,6 +1144,7 @@
           levels: [...poolAddLevels.value],
         });
         data.interviewerPool = pool;
+        data._markDirty('interviewerPool');
         data.persistAll();
         poolShowAdd.value = false;
         poolAddEmpId.value = null;
@@ -1090,6 +1167,7 @@
         if (idx >= 0) {
           pool[idx] = { ...pool[idx], trades: [...poolEditTrades.value], levels: [...poolEditLevels.value] };
           data.interviewerPool = pool;
+          data._markDirty('interviewerPool');
           data.persistAll();
         }
         poolEditItem.value = null;
@@ -1099,36 +1177,47 @@
       function poolRemove(id) {
         if (!confirm('确认移除该面试官？')) return;
         data.interviewerPool = (data.interviewerPool || []).filter((p) => p.id !== id);
+        data._markDirty('interviewerPool');
         data.persistAll();
       }
 
-      const poolFilteredRows = computed(() => {
+      const _interviewerStats = computed(() => {
         const pipe = data.recruitmentPipeline || [];
+        const stats = new Map();
+        pipe.forEach((c) => {
+          const stages = [
+            { by: c.hrScreeningBy, result: c.hrScreening },
+            { by: c.interview1By, result: c.interview1 },
+            { by: c.interview2By, result: c.interview2 },
+            { by: c.interviewFinalBy, result: c.interviewFinal },
+          ];
+          stages.forEach((s) => {
+            const name = String(s.by || '').trim();
+            if (!name || (s.result !== 'pass' && s.result !== 'fail')) return;
+            if (!stats.has(name)) stats.set(name, { count: 0, pass: 0 });
+            const st = stats.get(name);
+            st.count++;
+            if (s.result === 'pass') st.pass++;
+          });
+        });
+        return stats;
+      });
+
+      const poolFilteredRows = computed(() => {
+        const empMap = data._empMap;
         const pool = data.interviewerPool || [];
+        const iStats = _interviewerStats.value;
         let rows = pool.map((p) => {
-          const emp = (data.employees || []).find((e) => e.id === p.employeeId);
+          const emp = empMap.get(p.employeeId);
           const empName = emp ? emp.name : `(ID:${p.employeeId})`;
           const deptName = emp ? poolEmpDept(emp) : '—';
           const posName = emp ? poolEmpPos(emp) : '—';
           const empLevel = emp ? poolEmpLevel(emp) : '—';
 
           const nameStr = empName.trim();
-          let interviewCount = 0;
-          let passCount = 0;
-          pipe.forEach((c) => {
-            const stages = [
-              { by: c.hrScreeningBy, result: c.hrScreening },
-              { by: c.interview1By, result: c.interview1 },
-              { by: c.interview2By, result: c.interview2 },
-              { by: c.interviewFinalBy, result: c.interviewFinal },
-            ];
-            stages.forEach((s) => {
-              if (String(s.by || '').trim() === nameStr && (s.result === 'pass' || s.result === 'fail')) {
-                interviewCount++;
-                if (s.result === 'pass') passCount++;
-              }
-            });
-          });
+          const st = iStats.get(nameStr) || { count: 0, pass: 0 };
+          const interviewCount = st.count;
+          const passCount = st.pass;
 
           return {
             id: p.id,
@@ -1152,7 +1241,7 @@
       });
 
       return {
-        data, tab, priorityLabel, recruitTypeLabel,
+        auth, data, tab, priorityLabel, recruitTypeLabel,
         overviewData,
         fmapVisible, fmapMapping, fmapHeaders, fmapTitle, fmapOnConfirm,
         pipeCols, pipeGroups, pipeAllRows, pipeFilteredRows, pipeSelected, editingCell,

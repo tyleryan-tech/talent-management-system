@@ -33,7 +33,7 @@
           <p v-if="error" class="form-error">{{ error }}</p>
           <button type="submit" class="btn btn-primary btn-block">Sign in</button>
         </form>
-        <p class="hint muted">Demo: <strong>hrbp@company.com / 123</strong> (HRBP，可新建/移除产品线) · <strong>manager@company.com / 123</strong> (manager) · <strong>superadmin@company.com / 123</strong> (Super Admin). Usernames <strong>hrbp</strong>, <strong>manager</strong>, <strong>superadmin</strong> also work.</p>
+        <p class="hint muted">Demo: <strong>hrbp@company.com / 123</strong> (HRBP 超级管理员) · <strong>manager@company.com / 123</strong> (汇报经理) · <strong>intern@company.com / 123</strong> (实习生)</p>
       </div>
     </div>
   `,
@@ -43,7 +43,7 @@
     const auth = useAuthStore();
     const productLine = useProductLineStore();
     const hrScope = useHrScopeStore();
-    const username = ref('hrbp@company.com');
+    const username = ref('tyler.yan@shopee.com');
     const password = ref('123');
     const rolePick = ref('hrbp');
     const error = ref('');
@@ -54,7 +54,7 @@
 
     function pickRole(r) {
       rolePick.value = r;
-      username.value = r === 'hrbp' ? 'hrbp@company.com' : 'manager@company.com';
+      username.value = r === 'hrbp' ? 'tyler.yan@shopee.com' : 'manager@company.com';
       password.value = '123';
       error.value = '';
     }
@@ -99,7 +99,9 @@
         }
       }
       const redir = route.query.redirect;
-      if (typeof redir === 'string' && redir.startsWith('/')) router.push(redir);
+      const safeRedirect = typeof redir === 'string'
+        && /^\/(?:hrbp|manager|profile)(?:\/|$)/.test(redir);
+      if (safeRedirect) router.push(redir);
       else router.push(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
     }
 

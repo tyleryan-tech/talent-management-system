@@ -5,7 +5,6 @@
   const createOrgScopeBindings = window.TM.createOrgScopeBindings;
 
 const perfOpts = ['A', 'B', 'C'];
-/** Nine-box column order: low to high performance, A on the right */
 const perfOptsGridOrder = ['C', 'B', 'A'];
 const potOpts = ['H', 'M', 'L'];
 
@@ -17,10 +16,93 @@ function yearFromCycle(cycle) {
 
 function reviewGradeForDisplay(r) {
   if (!r) return '—';
-  if (r.status === 'finalized' && r.finalGrade) return String(r.finalGrade).trim();
+  if ((r.status === 'finalized' || r.status === 'calibrated') && r.finalGrade) return String(r.finalGrade).trim();
   if (r.rmInitialGrade) return String(r.rmInitialGrade).trim();
   return '—';
 }
+
+function tenureFromDate(fromStr) {
+  if (!fromStr) return '—';
+  const from = new Date(fromStr);
+  if (Number.isNaN(from.getTime())) return '—';
+  const to = new Date();
+  let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+  if (to.getDate() < from.getDate()) months -= 1;
+  if (months < 0) months = 0;
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  if (y > 0 && m > 0) return y + 'y ' + m + 'm';
+  if (y > 0) return y + 'y';
+  return m + 'm';
+}
+
+function computeAge(e) {
+  if (e.age != null && e.age !== '' && !Number.isNaN(Number(e.age))) {
+    const n = Math.floor(Number(e.age));
+    if (n >= 0 && n <= 130) return String(n);
+  }
+  const b = e.birthday;
+  if (!b) return '—';
+  const bd = new Date(b);
+  if (Number.isNaN(bd.getTime())) return '—';
+  const today = new Date();
+  let age = today.getFullYear() - bd.getFullYear();
+  const mDiff = today.getMonth() - bd.getMonth();
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < bd.getDate())) age--;
+  return age >= 0 ? String(age) : '—';
+}
+
+/* ── High-potential table column definitions (matches uploaded image structure) ── */
+const HP_GROUPS = [
+  { key: 'basic',  label: '基本信息',         color: '#546e7a', bg: '#eceff1' },
+  { key: 'grade',  label: '绩效 & 薪酬',      color: '#e65100', bg: '#fff3e0' },
+  { key: 'assess', label: '评估 & 发展',       color: '#bf360c', bg: '#fbe9e7' },
+  { key: 'employ', label: '在职信息',          color: '#1565c0', bg: '#e3f2fd' },
+  { key: 'action', label: '操作',             color: '#0d47a1', bg: '#bbdefb' },
+];
+
+const HP_COLS = [
+  { key: 'staffId',       label: 'Staff ID',        group: 'basic',  width: 72  },
+  { key: 'name',          label: '姓名',             group: 'basic',  width: 80  },
+  { key: 'jobFunction',   label: 'Job Function',     group: 'basic',  width: 90  },
+  { key: 'department',    label: '部门',             group: 'basic',  width: 100 },
+  { key: 'teamPath',      label: 'Team Path',        group: 'basic',  width: 120 },
+  { key: 'orgRole',       label: 'Title',            group: 'basic',  width: 60  },
+  { key: 'rank',          label: 'Rank',             group: 'basic',  width: 56  },
+
+  { key: 'performance',   label: '绩效评级',          group: 'grade',  width: 72  },
+  { key: 'perfHistory',   label: '绩效历史（近→远）',    group: 'grade',  width: 170, html: true },
+  { key: 'potential',     label: '潜力',             group: 'grade',  width: 80  },
+  { key: 'payPosition',   label: '薪资段位',          group: 'grade',  width: 80  },
+  { key: 'yoe',           label: 'YoE',             group: 'grade',  width: 50  },
+
+  { key: 'flightRisk',    label: 'Flight Risk',      group: 'assess', width: 80  },
+  { key: 'devPlan',       label: '发展计划',          group: 'assess', width: 180 },
+  { key: 'notes',         label: '备注',             group: 'assess', width: 140 },
+
+  { key: 'companyTenure',  label: '司龄',            group: 'employ', width: 64  },
+  { key: 'rankTenure',     label: '职级任期',         group: 'employ', width: 72  },
+  { key: 'hireDate',       label: '入职日期',         group: 'employ', width: 88  },
+  { key: 'age',            label: '年龄',            group: 'employ', width: 48  },
+  { key: 'school',         label: '毕业院校',         group: 'employ', width: 100 },
+  { key: 'status',         label: '状态',            group: 'employ', width: 72  },
+  { key: 'avgHours6m',     label: '6月均出勤',        group: 'employ', width: 80  },
+];
+
+function buildHpGroupSpans() {
+  const spans = [];
+  let cur = null;
+  HP_COLS.forEach((c) => {
+    if (cur && cur.key === c.group) { cur.span += 1; }
+    else { const g = HP_GROUPS.find((x) => x.key === c.group); cur = { key: c.group, label: g?.label || c.group, color: g?.color || '#333', bg: g?.bg || '#f5f5f5', span: 1 }; spans.push(cur); }
+  });
+  spans.push({ key: 'action', label: '操作', color: '#0d47a1', bg: '#bbdefb', span: 1 });
+  return spans;
+}
+const HP_GROUP_SPANS = buildHpGroupSpans();
+
+const STATUS_LABEL = { active: 'Active', probation: 'Probation', leave: 'Leaving' };
+const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', above_max: '> Max' };
 
   window.TM.HrbpTalent = {
   name: 'HrbpTalent',
@@ -38,20 +120,26 @@ function reviewGradeForDisplay(r) {
           <p class="muted small org-scope-hint">{{ scopeHint }}</p>
         </div>
       </div>
+
+      <!-- ══════════ NINE-BOX GRID ══════════ -->
       <section class="card pad">
-        <h3 class="section-title">Talent nine-box</h3>
-        <p class="muted">X-axis: performance (C left → A right). Y-axis: potential (high / medium / low). Names stay in sync with the <strong>roster</strong>: active employees have a cell (default B/M); Leaving employees are excluded. Cells refresh after product line changes, saves, or roster import.</p>
-        <div class="nine-grid">
-          <div class="nine-corner muted small">Potential \\ Performance</div>
-          <div v-for="p in perfOptsGridOrder" :key="'h'+p" class="nine-col-h">{{ p }}</div>
-          <template v-for="pot in potOrder" :key="pot">
-            <div class="nine-row-h">{{ potLabel(pot) }}</div>
-            <div v-for="perf in perfOptsGridOrder" :key="pot+perf" class="nine-cell">
-              <div class="nine-cell-head">{{ potLabel(pot) }} · {{ perf }}</div>
-              <ul class="nine-emp-list">
-                <li v-for="e in cell(perf, pot)" :key="e.id">
+        <h3 class="section-title">Talent Nine-Box</h3>
+        <p class="muted small" style="margin-bottom:10px">X: Potential (L→H). Y: Performance (A→C). 高潜高绩效位于右上角。数据实时同步花名册。</p>
+        <div class="nine-grid nine-grid-capped">
+          <div class="nine-corner muted small">Performance \\ Potential</div>
+          <div v-for="pot in potColOrder" :key="'h'+pot" class="nine-col-h">{{ potLabel(pot) }}</div>
+          <template v-for="perf in perfRowOrder" :key="perf">
+            <div class="nine-row-h">{{ perf }}</div>
+            <div v-for="pot in potColOrder" :key="perf+pot" class="nine-cell">
+              <div class="nine-cell-head">
+                {{ perf }} · {{ potLabel(pot) }}
+                <span class="nine-cell-count">({{ cell(perf, pot).length }})</span>
+              </div>
+              <div class="nine-cell-body">
+                <div v-for="e in cell(perf, pot)" :key="e.id" class="nine-emp-item">
                   <button type="button" class="linklike" @click="openPerfHistory(e)">{{ e.name }}</button>
                   <select
+                    v-if="auth.hasPermission('talent.potential')"
                     class="input nine-pot-select"
                     :value="employeePotential(e.id)"
                     title="Adjust potential"
@@ -60,53 +148,95 @@ function reviewGradeForDisplay(r) {
                   >
                     <option v-for="x in potOpts" :key="x" :value="x">{{ potLabel(x) }} ({{ x }})</option>
                   </select>
-                  <button type="button" class="btn-icon-tweak" title="Adjust performance & potential" @click.stop="pickEmp(e)" aria-label="Edit labels">
+                  <button v-if="auth.hasPermission('talent.labels')" type="button" class="btn-icon-tweak" title="Edit labels" @click.stop="pickEmp(e)">
                     <i class="fa-solid fa-pen"></i>
                   </button>
-                </li>
-              </ul>
+                </div>
+              </div>
             </div>
           </template>
         </div>
       </section>
+
+      <!-- ══════════ HIGH-POTENTIAL TABLE (image-matched layout) ══════════ -->
       <section class="card pad">
-        <h3 class="section-title">High-potential talent (perf A/B, potential H)</h3>
-        <p class="muted small"><strong>Development plan</strong> is free text; saved on blur. Independent from roster “management plan”.</p>
-        <div class="table-scroll-wrap">
-        <table class="data-table highpot-table">
-          <thead><tr><th>Name</th><th>Department</th><th>Last performance</th><th>Potential</th><th>Development plan</th></tr></thead>
-          <tbody>
-            <tr v-for="row in highPot" :key="row.employeeId">
-              <td><button type="button" class="linklike" @click="openPerfHistoryById(row.employeeId)">{{ row.name }}</button></td>
-              <td>{{ row.dept }}</td>
-              <td>
-                <span v-if="row.lastPerformance && row.lastPerformance !== '—'" class="tag perf-grade-tag">{{ row.lastPerformance }}</span>
-                <span v-else class="muted">—</span>
-              </td>
-              <td>
-                <select
-                  class="input nine-pot-select table-inline"
-                  :value="row.potential"
-                  title="Adjust potential"
-                  @change="onPotentialChangeById(row.employeeId, row.matrixPerformance, $event)"
-                >
-                  <option v-for="x in potOpts" :key="x" :value="x">{{ potLabel(x) }} ({{ x }})</option>
-                </select>
-              </td>
-              <td class="highpot-devplan-cell">
-                <textarea
-                  class="input highpot-devplan-input"
-                  rows="2"
-                  :value="row.developmentPlan"
-                  placeholder="Development plan (saved on blur)…"
-                  @blur="onHighPotDevPlanBlur(row.employeeId, $event)"
-                ></textarea>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <h3 class="section-title">高潜人才分析 <span class="muted small" style="font-weight:400;margin-left:8px">Performance A/B + Potential H</span></h3>
+        <p class="muted small" style="margin-bottom:8px">数据实时从花名册 + 绩效 + 九宫格获取。点击姓名查看绩效历史，发展计划/备注可直接编辑。</p>
+        <p v-if="!highPotRows.length" class="muted small">当前范围内暂无高潜人才（Performance ≥ B 且 Potential = H）。</p>
+        <div v-else class="table-card hp-scroll">
+          <table class="hp-table">
+            <thead>
+              <tr class="hp-group-row">
+                <th v-for="g in hpGroupSpans" :key="g.key" :colspan="g.span"
+                  class="hp-grp-th" :style="{ background: g.bg, color: g.color }">{{ g.label }}</th>
+              </tr>
+              <tr class="hp-col-row">
+                <th v-for="col in hpCols" :key="col.key" class="hp-col-th"
+                  :style="{ minWidth: col.width + 'px' }">{{ col.label }}</th>
+                <th class="hp-col-th" style="min-width:80px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in highPotRows" :key="row.employeeId">
+                <td>{{ row.staffId }}</td>
+                <td class="hp-name-cell">
+                  <button type="button" class="linklike" @click="openPerfHistoryById(row.employeeId)">{{ row.name }}</button>
+                </td>
+                <td>{{ row.jobFunction }}</td>
+                <td>{{ row.department }}</td>
+                <td class="hp-cell-clip" :title="row.teamPath">{{ row.teamPath }}</td>
+                <td>{{ row.orgRole }}</td>
+                <td><span v-if="row.rank" class="tag tag-level">{{ row.rank }}</span><span v-else class="muted">—</span></td>
+
+                <td><span class="tag perf-grade-tag">{{ row.performance }}</span></td>
+                <td>
+                  <span class="perf-grade-inline" v-html="row.perfHistory || '—'"></span>
+                </td>
+                <td>
+                  <select v-if="auth.hasPermission('talent.potential')" class="input nine-pot-select table-inline"
+                    :value="row.potential"
+                    @change="onPotentialChangeById(row.employeeId, row.performance, $event)">
+                    <option v-for="x in potOpts" :key="x" :value="x">{{ potLabel(x) }} ({{ x }})</option>
+                  </select>
+                  <span v-else class="tag">{{ potLabel(row.potential) }} ({{ row.potential }})</span>
+                </td>
+                <td><span :class="row.payClass">{{ row.payPosition }}</span></td>
+                <td>{{ row.yoe }}</td>
+
+                <td><span :class="row.riskClass">{{ row.flightRisk }}</span></td>
+                <td class="hp-edit-cell">
+                  <textarea v-if="auth.hasPermission('talent.devPlan')" class="input hp-edit-input" rows="1"
+                    :value="row.devPlan"
+                    placeholder="发展计划…"
+                    @blur="onDevPlanBlur(row.employeeId, $event)"></textarea>
+                  <span v-else class="muted small">{{ row.devPlan || '—' }}</span>
+                </td>
+                <td class="hp-edit-cell">
+                  <textarea v-if="auth.hasPermission('talent.labels')" class="input hp-edit-input" rows="1"
+                    :value="row.notes"
+                    placeholder="备注…"
+                    @blur="onNotesBlur(row.employeeId, $event)"></textarea>
+                  <span v-else class="muted small">{{ row.notes || '—' }}</span>
+                </td>
+
+                <td>{{ row.companyTenure }}</td>
+                <td>{{ row.rankTenure }}</td>
+                <td>{{ row.hireDate }}</td>
+                <td>{{ row.age }}</td>
+                <td class="hp-cell-clip" :title="row.school">{{ row.school }}</td>
+                <td><span class="tag" :data-status="row.statusKey">{{ row.status }}</span></td>
+                <td :class="hoursClass(row.avgHours6m)">{{ row.avgHours6m != null ? row.avgHours6m : '—' }}</td>
+
+                <td>
+                  <button v-if="auth.hasPermission('talent.labels')" type="button" class="btn-link" @click="pickEmpById(row.employeeId)" title="Edit labels"><i class="fa-solid fa-pen"></i></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
+
+      <!-- ══════════ SUCCESSION ══════════ -->
       <section class="card pad">
         <h3 class="section-title">Succession</h3>
         <table class="data-table">
@@ -116,26 +246,23 @@ function reviewGradeForDisplay(r) {
               <td>{{ posName(s.positionId) }}</td>
               <td>{{ succNames(s.successorIds) }}</td>
               <td class="cell-clip">{{ s.note }}</td>
-              <td><button type="button" class="btn-link" @click="editSucc(s)">Edit</button></td>
+              <td><button v-if="auth.hasPermission('talent.succession')" type="button" class="btn-link" @click="editSucc(s)">Edit</button></td>
             </tr>
           </tbody>
         </table>
-        <button type="button" class="btn btn-secondary btn-sm" @click="openSuccCreate">Add succession plan</button>
+        <button v-if="auth.hasPermission('talent.succession')" type="button" class="btn btn-secondary btn-sm" @click="openSuccCreate">Add succession plan</button>
       </section>
 
+      <!-- ── Performance history modal ── -->
       <div v-if="perfModal" class="modal-backdrop" @click.self="perfModal = false">
         <div class="modal card wide">
           <h3>Performance grades (3 years) · {{ perfEmp?.name }}</h3>
-          <p class="muted small">By calendar year: latest review per employee per year (by cycle start). Grade is <strong>final</strong> if archived, else RM initial. “Prev-cycle avg hours” comes from that review row.</p>
+          <p class="muted small">By calendar year: latest review per employee per year. Grade is <strong>final</strong> if archived, else RM initial.</p>
           <table class="data-table compact" v-if="perfThreeYears.length">
-            <thead>
-              <tr><th>Year</th><th>Cycle</th><th>Prev-cycle avg hours</th><th>Grade</th></tr>
-            </thead>
+            <thead><tr><th>Year</th><th>Cycle</th><th>Prev-cycle avg hours</th><th>Grade</th></tr></thead>
             <tbody>
               <tr v-for="row in perfThreeYears" :key="row.year">
-                <td>{{ row.year }}</td>
-                <td>{{ row.cycle }}</td>
-                <td>{{ row.hours }}</td>
+                <td>{{ row.year }}</td><td>{{ row.cycle }}</td><td>{{ row.hours }}</td>
                 <td>
                   <span v-if="row.grade && row.grade !== '—'" class="tag perf-grade-tag">{{ row.grade }}</span>
                   <span v-else class="muted">—</span>
@@ -143,13 +270,14 @@ function reviewGradeForDisplay(r) {
               </tr>
             </tbody>
           </table>
-          <div class="modal-actions" style="margin-top:1rem;flex-wrap:wrap">
+          <div class="modal-actions" style="margin-top:1rem">
             <button type="button" class="btn btn-ghost" @click="perfModal = false">Close</button>
-            <button type="button" class="btn btn-secondary" @click="fromPerfOpenTag">Edit nine-box labels</button>
+            <button v-if="auth.hasPermission('talent.labels')" type="button" class="btn btn-secondary" @click="fromPerfOpenTag">Edit nine-box labels</button>
           </div>
         </div>
       </div>
 
+      <!-- ── Edit labels modal ── -->
       <div v-if="tagModal" class="modal-backdrop" @click.self="tagModal = false">
         <div class="modal card">
           <h3>Edit labels · {{ tagEmp?.name }}</h3>
@@ -172,6 +300,7 @@ function reviewGradeForDisplay(r) {
         </div>
       </div>
 
+      <!-- ── Succession modal ── -->
       <div v-if="succModal" class="modal-backdrop" @click.self="succModal = false">
         <div class="modal card wide">
           <h3>{{ succForm.id ? 'Edit succession plan' : 'Add succession plan' }}</h3>
@@ -198,15 +327,21 @@ function reviewGradeForDisplay(r) {
   `,
   setup() {
     const data = useDataStore();
+    const auth = window.TM.useAuthStore();
     const hrScope = useHrScopeStore();
+    const orgScope = createOrgScopeBindings(data, hrScope);
     const {
       scopeDeptIds,
       scopeRootDeptUi,
       deptScopeOptions,
       scopeHint,
-      employeeInScope,
       positionDeptInScope,
-    } = createOrgScopeBindings(data, hrScope);
+    } = orgScope;
+    const _zs = window.TM.useZoneScope(data);
+    function employeeInScope(emp) {
+      if (!_zs.employeeInTeam(emp)) return false;
+      return orgScope.employeeInScope(emp);
+    }
 
     const positionsForSucc = computed(() => {
       const set = scopeDeptIds.value;
@@ -237,6 +372,8 @@ function reviewGradeForDisplay(r) {
       data.successionPlans.filter((s) => positionDeptInScope(s.positionId)),
     );
     const potOrder = ['H', 'M', 'L'];
+    const potColOrder = ['L', 'M', 'H'];
+    const perfRowOrder = ['A', 'B', 'C'];
     const tagModal = ref(false);
     const tagEmp = ref(null);
     const tagForm = reactive({ performance: 'B', potential: 'M' });
@@ -259,14 +396,23 @@ function reviewGradeForDisplay(r) {
         if (!employeeInScope(e)) return false;
         const m = matrixRow(e.id);
         if (!m) return false;
-        return m.performance === perf && m.potential === pot;
+        const rating = computedPerfRating(e.id);
+        return rating === perf && m.potential === pot;
       });
     }
 
-    /** Latest review grade for employee (final if archived, else RM initial) */
+    function perfHistoryHtml(employeeId) {
+      const list = data._reviewsByEmp.get(Number(employeeId)) || [];
+      return window.TM.allGradesForDisplay(list, data.performanceCycles) || '—';
+    }
+
+    function computedPerfRating(employeeId) {
+      const list = data._reviewsByEmp.get(Number(employeeId)) || [];
+      return window.TM.computePerfRatingFromReviews(list, data.performanceCycles);
+    }
+
     function lastReviewGrade(employeeId) {
-      const eid = Number(employeeId);
-      const list = data.performanceReviews.filter((r) => Number(r.employeeId) === eid);
+      const list = data._reviewsByEmp.get(Number(employeeId)) || [];
       if (!list.length) return '—';
       const sorted = [...list].sort((a, b) => {
         const cmp = window.TM.reviewSortStamp(data, b).localeCompare(window.TM.reviewSortStamp(data, a));
@@ -276,32 +422,124 @@ function reviewGradeForDisplay(r) {
       return reviewGradeForDisplay(sorted[0]);
     }
 
-    const highPot = computed(() => {
+    /* ── Department path builder ── */
+    function teamPathForEmp(e) {
+      const lineStore = window.TM.useProductLineStore?.();
+      const lineName = lineStore?.currentLine?.name || '';
+      if (!e.departmentId) return lineName || '—';
+      const chain = [];
+      let dId = e.departmentId;
+      let guard = 0;
+      while (dId && guard < 20) {
+        const dept = data.departments.find((d) => d.id === dId);
+        if (!dept) break;
+        chain.push(dept.name);
+        dId = dept.parentId || null;
+        guard++;
+      }
+      chain.reverse();
+      return [lineName, ...chain].filter(Boolean).join(' > ');
+    }
+
+    /* ── Flight risk heuristic ── */
+    function computeFlightRisk(e, m) {
+      let score = 0;
+      const tenure = e.hireDate ? tenureFromDate(e.hireDate) : '—';
+      if (tenure !== '—') {
+        const match = tenure.match(/(\d+)y/);
+        const years = match ? Number(match[1]) : 0;
+        if (years >= 3 && years <= 5) score += 1;
+      }
+      if (e.salaryBand === 'below_min' || e.salaryBand === 'p25') score += 1;
+      const rankTenure = e.rankStartDate || e.levelStartDate;
+      if (rankTenure) {
+        const rm = tenureFromDate(rankTenure).match(/(\d+)y/);
+        if (rm && Number(rm[1]) >= 2) score += 1;
+      }
+      if (score >= 2) return 'High';
+      if (score >= 1) return 'Medium';
+      return 'Low';
+    }
+
+    /* ── High-potential rows (comprehensive, matching image) ── */
+    const hpCols = HP_COLS;
+    const hpGroupSpans = HP_GROUP_SPANS;
+
+    const highPotRows = computed(() => {
+      const empMap = data._empMap;
+      const posMap = data._posMap;
+      const deptMap = data._deptMap;
+      const attIdx = data._attIdx;
+      const att = window.TM.attendance;
+      const months6 = att ? att.periodMonths('6month') : [];
       return data.talentMatrix
         .filter((m) => {
-          if (!['A', 'B'].includes(m.performance) || m.potential !== 'H') return false;
-          const e = data.employees.find((x) => x.id === m.employeeId);
+          if (m.potential !== 'H') return false;
+          const rating = computedPerfRating(m.employeeId);
+          if (!['A', 'B'].includes(rating)) return false;
+          const e = empMap.get(m.employeeId);
           return e && e.status !== 'leave' && employeeInScope(e);
         })
         .map((m) => {
-          const e = data.employees.find((x) => x.id === m.employeeId);
+          const e = empMap.get(m.employeeId) || {};
+          const pos = posMap.get(e.positionId);
+          const dept = deptMap.get(e.departmentId);
+          const risk = computeFlightRisk(e, m);
+          const pay = PAY_LABELS[e.salaryBand] || e.salaryBand || '—';
+          const rating = computedPerfRating(m.employeeId);
           return {
             employeeId: m.employeeId,
-            name: e?.name || m.employeeId,
-            dept: data.departments.find((d) => d.id === e?.departmentId)?.name || '-',
-            matrixPerformance: m.performance,
-            lastPerformance: lastReviewGrade(m.employeeId),
+            staffId: e.staffId || e.id || '—',
+            name: e.name || e.displayName || String(m.employeeId),
+            jobFunction: e.jobFunction || pos?.name || '—',
+            department: dept?.name || '—',
+            teamPath: teamPathForEmp(e),
+            orgRole: e.title || e.orgRole || '—',
+            rank: pos?.level || e.rank || '',
+            performance: rating,
+            perfHistory: perfHistoryHtml(m.employeeId),
             potential: m.potential,
-            developmentPlan: String(m.developmentPlan ?? '').trim(),
+            payPosition: pay,
+            payClass: e.salaryBand === 'below_min' ? 'tag tag-risk-high' : e.salaryBand === 'above_max' ? 'tag tag-risk-low' : '',
+            yoe: e.yoe || e.companyTenure || '—',
+            flightRisk: risk,
+            riskClass: risk === 'High' ? 'tag tag-risk-high' : risk === 'Medium' ? 'tag tag-risk-med' : 'tag tag-risk-low',
+            devPlan: String(m.developmentPlan ?? '').trim(),
+            notes: String(e.managementPlan ?? '').trim(),
+            companyTenure: tenureFromDate(e.hireDate),
+            rankTenure: tenureFromDate(e.rankStartDate || e.levelStartDate),
+            hireDate: e.hireDate || '—',
+            age: computeAge(e),
+            school: e.school || e.gradSchool || '—',
+            statusKey: e.status,
+            status: STATUS_LABEL[e.status] || e.status || '—',
+            avgHours6m: att ? att.empAvgHours(attIdx, e.id, months6) : null,
           };
+        })
+        .sort((a, b) => {
+          const perfOrder = { A: 0, B: 1 };
+          const d = (perfOrder[a.performance] ?? 9) - (perfOrder[b.performance] ?? 9);
+          return d !== 0 ? d : a.name.localeCompare(b.name, 'zh-Hans-CN');
         });
     });
+
+    function onDevPlanBlur(employeeId, ev) {
+      data.setTalentDevelopmentPlan(employeeId, String(ev?.target?.value ?? ''));
+    }
+
+    function onNotesBlur(employeeId, ev) {
+      const emp = data._empMap.get(employeeId);
+      if (emp) {
+        emp.managementPlan = String(ev?.target?.value ?? '');
+        data.persistKeys('employees');
+      }
+    }
 
     function potLabel(p) {
       return { H: 'High', M: 'Medium', L: 'Low' }[p] || p;
     }
     function posName(id) {
-      return data.positions.find((p) => p.id === id)?.name || id;
+      return data._posMap.get(id)?.name || id;
     }
     function succPosOption(p) {
       const d = data.departments.find((x) => x.id === p.departmentId);
@@ -334,9 +572,7 @@ function reviewGradeForDisplay(r) {
       const years = [nowY - 2, nowY - 1, nowY];
       return years.map((y) => {
         const r = byYear.get(y);
-        if (!r) {
-          return { year: y, cycle: '—', hours: '—', grade: '—' };
-        }
+        if (!r) return { year: y, cycle: '—', hours: '—', grade: '—' };
         return {
           year: y,
           cycle: window.TM.reviewCycleLabel(data, r),
@@ -371,30 +607,30 @@ function reviewGradeForDisplay(r) {
     function onPotentialChange(e, ev) {
       const next = String(ev.target?.value ?? '').trim();
       if (!potOpts.includes(next)) return;
-      const m = matrixRow(e.id);
-      const perf = (m?.performance && perfOpts.includes(m.performance)) ? m.performance : 'B';
+      const perf = computedPerfRating(e.id);
       data.upsertTalentCell(e.id, perf, next);
     }
 
-    function onPotentialChangeById(employeeId, performance, ev) {
+    function onPotentialChangeById(employeeId, _performance, ev) {
       const next = String(ev.target?.value ?? '').trim();
       if (!potOpts.includes(next)) return;
-      const perf = (performance && perfOpts.includes(performance)) ? performance : 'B';
+      const perf = computedPerfRating(employeeId);
       data.upsertTalentCell(employeeId, perf, next);
     }
 
-    function onHighPotDevPlanBlur(employeeId, ev) {
-      const v = String(ev?.target?.value ?? '');
-      data.setTalentDevelopmentPlan(employeeId, v);
-    }
-
     function pickEmp(e) {
-      const m = matrixRow(e.id) || { performance: 'B', potential: 'M' };
+      const m = matrixRow(e.id) || { potential: 'M' };
       tagEmp.value = e;
-      tagForm.performance = m.performance;
+      tagForm.performance = computedPerfRating(e.id);
       tagForm.potential = m.potential;
       tagModal.value = true;
     }
+
+    function pickEmpById(employeeId) {
+      const e = data.employees.find((x) => x.id === employeeId);
+      if (e) pickEmp(e);
+    }
+
     function saveTag() {
       if (tagEmp.value) {
         data.upsertTalentCell(tagEmp.value.id, tagForm.performance, tagForm.potential);
@@ -420,13 +656,15 @@ function reviewGradeForDisplay(r) {
     }
 
     return {
-      data, perfOpts, perfOptsGridOrder, potOpts, potOrder, cell, highPot, potLabel, posName, succPosOption, succNames,
-      employeePotential, onPotentialChange, onPotentialChangeById, onHighPotDevPlanBlur,
+      auth, data, perfOpts, perfOptsGridOrder, potOpts, potOrder, potColOrder, perfRowOrder, cell, potLabel, posName, succPosOption, succNames,
+      employeePotential, onPotentialChange, onPotentialChangeById,
       scopeRootDeptUi, deptScopeOptions, scopeHint,
       successionPlansScoped, positionsForSucc, positionsForSuccModal, employeesForSuccModal,
       perfModal, perfEmp, perfThreeYears, openPerfHistory, openPerfHistoryById, fromPerfOpenTag,
-      tagModal, tagEmp, tagForm, pickEmp, saveTag,
+      tagModal, tagEmp, tagForm, pickEmp, pickEmpById, saveTag,
       succModal, succForm, succMulti, editSucc, openSuccCreate, saveSucc,
+      hpCols, hpGroupSpans, highPotRows, onDevPlanBlur, onNotesBlur,
+      hoursClass: (v) => window.TM.attendance?.hoursClass(v) || '',
     };
   },
 };

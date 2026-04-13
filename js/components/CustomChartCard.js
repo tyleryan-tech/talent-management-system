@@ -15,28 +15,32 @@
       ? [...data.employees]
       : data.employees.filter((e) => e.status !== 'leave');
 
+    const posMap = data._posMap;
+    const deptMap = data._deptMap;
+    let tmMap;
     const groups = {};
     emps.forEach((e) => {
       let key = '—';
       switch (config.groupBy) {
         case 'rank': {
-          const p = data.positions.find((x) => x.id === e.positionId);
-          key = p?.level || '—'; break;
+          key = posMap.get(e.positionId)?.level || '—'; break;
         }
         case 'team': {
-          const d = data.departments.find((x) => x.id === e.departmentId);
-          key = d?.name || '—'; break;
+          key = deptMap.get(e.departmentId)?.name || '—'; break;
         }
         case 'status':
           key = STATUS_LABELS[e.status] || e.status; break;
         case 'gender':
           key = e.gender || '—'; break;
         case 'jobFunction': {
-          const p = data.positions.find((x) => x.id === e.positionId);
-          key = p?.name || '—'; break;
+          key = posMap.get(e.positionId)?.name || '—'; break;
         }
         case 'potential': {
-          const m = (data.talentMatrix || []).find((x) => Number(x.employeeId) === Number(e.id));
+          if (!tmMap) {
+            tmMap = new Map();
+            (data.talentMatrix || []).forEach((x) => tmMap.set(Number(x.employeeId), x));
+          }
+          const m = tmMap.get(Number(e.id));
           key = { H: 'High', M: 'Medium', L: 'Low' }[m?.potential] || 'Not assessed'; break;
         }
         case 'payPosition': {

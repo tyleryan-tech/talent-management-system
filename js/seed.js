@@ -167,8 +167,8 @@ function seedAllData(lineId) {
 
   const empById = new Map(employees.map((e) => [e.id, e]));
   const users = [
-    { id: 1, username: 'hrbp', email: 'hrbp@company.com', password: '123', role: 'hrbp', realName: (empById.get(1001) || {}).name || '', employeeId: 1001 },
-    { id: 2, username: 'manager', email: 'manager@company.com', password: '123', role: 'manager', realName: (empById.get(1005) || {}).name || '', employeeId: 1005 },
+    { id: 1, username: 'hrbp', email: 'hrbp@company.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: (empById.get(1001) || {}).name || '', employeeId: 1001 },
+    { id: 2, username: 'manager', email: 'manager@company.com', password: '123', role: 'manager', realName: (empById.get(1005) || {}).name || '', employeeId: 1005, rmStatus: 'active', managerPermissions: { modules: ['dashboard','roster','org','recruitment','talent','performance','attendance'], ops: window.TM.RM_ALL_OPS_ON() } },
     {
       id: 3,
       username: 'superadmin',
@@ -176,9 +176,12 @@ function seedAllData(lineId) {
       password: '123',
       role: 'hrbp',
       superAdmin: true,
+      hrbpSubType: 'super_admin',
       realName: 'Super Admin',
       employeeId: null,
     },
+    { id: 4, username: 'intern', email: 'intern@company.com', password: '123', role: 'hrbp', hrbpSubType: 'intern', allowedModules: ['recruitment'], realName: 'Intern Demo', employeeId: null },
+    { id: 5, username: 'tyler.yan', email: 'tyler.yan@shopee.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'Tyler Yan', employeeId: null },
   ];
 
   const leaveRequests = [
@@ -188,65 +191,83 @@ function seedAllData(lineId) {
     { id: nextLeaveId(), employeeId: 1019, type: 'overtime', startDate: '2025-03-15', endDate: '2025-03-15', reason: 'Overtime comp day', status: 'rejected', approverId: 1018, createdAt: '2025-03-14' },
   ];
 
-  const performanceReviews = [
-    {
-      id: nextReviewId(),
-      employeeId: 1006,
-      reviewerId: 1005,
-      cycleId: 1,
-      historyPerformance: 'FY2024 rating B+; stable delivery in H1.',
-      outputDescription: '',
-      rmInitialGrade: '',
-      prevCycleAvgHours: 9.2,
-      finalGrade: '',
-      approvalChain: [],
-      approvalStepIndex: 0,
-      pendingApproverId: 1005,
-      approvalLog: [],
-      status: 'rm_pending',
-      comments: '',
-      devAdvice: '',
-      createdAt: '2025-03-20',
-    },
-    {
-      id: nextReviewId(),
-      employeeId: 1012,
-      reviewerId: 1011,
-      cycleId: 1,
-      historyPerformance: 'Last year A-; core contributor to growth initiatives.',
-      outputDescription: 'Led membership growth experiments; 3 iterations shipped.',
-      rmInitialGrade: 'A-',
-      prevCycleAvgHours: 10.1,
-      finalGrade: '',
-      approvalChain: [1005],
-      approvalStepIndex: 0,
-      pendingApproverId: 1005,
-      approvalLog: [{ approverId: 1011, at: '2025-03-19', action: 'submit', note: 'RM submitted initial review' }],
-      status: 'in_approval',
-      comments: 'Continue investing in the A/B platform',
-      devAdvice: '',
-      createdAt: '2025-03-19',
-    },
-    {
-      id: nextReviewId(),
-      employeeId: 1007,
-      reviewerId: 1005,
-      cycleId: 2,
-      historyPerformance: 'Consistent B+ or above in past cycles.',
-      outputDescription: 'Key annual project delivered on time.',
-      rmInitialGrade: 'B+',
-      prevCycleAvgHours: 8.5,
-      finalGrade: 'B+',
-      approvalChain: [],
-      approvalStepIndex: 0,
-      pendingApproverId: null,
-      approvalLog: [],
-      status: 'finalized',
-      comments: '',
-      devAdvice: '',
-      createdAt: '2025-01-08',
-    },
+  const performanceCycles = [
+    { id: 1, name: 'H1 2022', cycleType: 'half_year', startDate: '2022-01-01', endDate: '2022-06-30', status: 'closed' },
+    { id: 2, name: 'FY 2022', cycleType: 'year', startDate: '2022-01-01', endDate: '2022-12-31', status: 'closed' },
+    { id: 3, name: 'H1 2023', cycleType: 'half_year', startDate: '2023-01-01', endDate: '2023-06-30', status: 'closed' },
+    { id: 4, name: 'FY 2023', cycleType: 'year', startDate: '2023-01-01', endDate: '2023-12-31', status: 'closed' },
+    { id: 5, name: 'H1 2024', cycleType: 'half_year', startDate: '2024-01-01', endDate: '2024-06-30', status: 'closed' },
+    { id: 6, name: 'FY 2024', cycleType: 'year', startDate: '2024-01-01', endDate: '2024-12-31', status: 'closed' },
+    { id: 7, name: 'H1 2025', cycleType: 'half_year', startDate: '2025-01-01', endDate: '2025-06-30', status: 'open' },
   ];
+
+  const performanceReviews = (function buildPerfReviews() {
+    const GRADES = ['A+', 'A', 'A-', 'B+', 'B', 'C', 'C-'];
+    const WEIGHTS = [3, 10, 15, 30, 25, 12, 5];
+    const cumW = [];
+    let s = 0;
+    WEIGHTS.forEach((w) => { s += w; cumW.push(s); });
+    function seededRand(seed) { let x = seed; return () => { x = (x * 1103515245 + 12345) & 0x7fffffff; return x / 0x7fffffff; }; }
+    function pickGrade(rng, bias) {
+      const r = rng() * 100;
+      let idx = cumW.findIndex((c) => r < c);
+      if (idx < 0) idx = 4;
+      idx = Math.max(0, Math.min(GRADES.length - 1, idx + bias));
+      return GRADES[idx];
+    }
+    const reviews = [];
+    let rid = 1;
+    const CURRENT_CYCLE_ID = 7;
+    const activeEmps = employees.filter((e) => e.status !== 'leave');
+    activeEmps.forEach((e) => {
+      const rng = seededRand(e.id * 7 + 31);
+      const bias = Math.floor(rng() * 3) - 1;
+      const hireY = Number(String(e.hireDate || '2024').slice(0, 4));
+      const hireM = Number(String(e.hireDate || '2024-01').slice(5, 7)) || 1;
+      performanceCycles.forEach((cy) => {
+        const cyStartY = Number(String(cy.startDate).slice(0, 4));
+        const cyStartM = Number(String(cy.startDate).slice(5, 7));
+        if (cyStartY < hireY || (cyStartY === hireY && cyStartM < hireM)) return;
+        if (cy.id === CURRENT_CYCLE_ID) {
+          const roll = rng();
+          let status, rmG, fG;
+          rmG = pickGrade(rng, bias);
+          if (roll < 0.25) { status = 'rm_pending'; rmG = ''; fG = ''; }
+          else if (roll < 0.45) { status = 'in_approval'; fG = ''; }
+          else if (roll < 0.65) { status = 'pl_approved'; fG = ''; }
+          else { status = 'finalized'; fG = rmG; }
+          reviews.push({
+            id: rid++, employeeId: e.id, reviewerId: e.managerId || 1001,
+            cycleId: cy.id, rmInitialGrade: rmG, finalGrade: fG, status,
+            rmComment: status !== 'rm_pending' ? 'H1 2025 评估评语' : '',
+            outputDescription: status !== 'rm_pending' ? '本周期产出总结' : '',
+            historyPerformance: '', comments: '', devAdvice: '',
+            approvalChain: [], approvalStepIndex: 0, pendingApproverId: status === 'rm_pending' ? (e.managerId || 1001) : null,
+            approvalLog: [], prevCycleAvgHours: null,
+            communicationNotes: '', communicatedAt: null, appealDeadline: null,
+            calibratedBy: status === 'finalized' ? 1001 : null,
+            calibratedAt: status === 'finalized' ? '2025-03-28' : null,
+            createdAt: '2025-03-15',
+          });
+        } else {
+          const g = pickGrade(rng, bias);
+          reviews.push({
+            id: rid++, employeeId: e.id, reviewerId: e.managerId || 1001,
+            cycleId: cy.id, rmInitialGrade: g, finalGrade: g, status: 'finalized',
+            rmComment: cy.name + ' 绩效评语', outputDescription: '产出符合预期',
+            historyPerformance: '', comments: '', devAdvice: '',
+            approvalChain: [], approvalStepIndex: 0, pendingApproverId: null,
+            approvalLog: [{ approverId: e.managerId || 1001, at: cy.endDate, action: 'calibrate', note: 'HRBP 校准' }],
+            prevCycleAvgHours: null,
+            communicationNotes: '已沟通', communicatedAt: cy.endDate, appealDeadline: null,
+            calibratedBy: 1001, calibratedAt: cy.endDate,
+            createdAt: cy.startDate,
+          });
+        }
+      });
+    });
+    return reviews;
+  })();
 
   const trainings = [
     { id: 1, title: 'Vue 3 in Practice', description: 'Reactivity and Composition API', category: 'Tech', durationHours: 8 },
@@ -270,44 +291,84 @@ function seedAllData(lineId) {
     loadBandHigh: 1.12,
   };
 
-  const febWorkdays = [
-    '2025-02-03', '2025-02-04', '2025-02-05', '2025-02-06', '2025-02-07',
-    '2025-02-10', '2025-02-11', '2025-02-12', '2025-02-13', '2025-02-14',
-    '2025-02-17', '2025-02-18', '2025-02-19', '2025-02-20', '2025-02-21',
-    '2025-02-24', '2025-02-25', '2025-02-26', '2025-02-27', '2025-02-28',
+  /* ── Attendance demo data ── */
+  function genWorkdays(year, month) {
+    const days = [];
+    const daysInMonth = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dt = new Date(year, month - 1, d);
+      const dow = dt.getDay();
+      if (dow !== 0 && dow !== 6) {
+        days.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+      }
+    }
+    return days;
+  }
+
+  function randTime(baseHour, baseMin, jitterMin) {
+    const total = baseHour * 60 + baseMin + Math.floor(Math.random() * jitterMin * 2) - jitterMin;
+    const h = Math.max(0, Math.min(23, Math.floor(total / 60)));
+    const m = Math.max(0, Math.min(59, total % 60));
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  const PUNCH_MONTHS = [
+    { y: 2025, m: 10 }, { y: 2025, m: 11 }, { y: 2025, m: 12 },
+    { y: 2026, m: 1 }, { y: 2026, m: 2 }, { y: 2026, m: 3 },
   ];
-  let punchId = 1;
+
+  const TIER_TARGETS = [
+    { outH: 18, outM: 10, jitter: 10 },
+    { outH: 18, outM: 50, jitter: 10 },
+    { outH: 19, outM: 20, jitter: 8  },
+    { outH: 19, outM: 50, jitter: 10 },
+    { outH: 20, outM: 25, jitter: 12 },
+  ];
+
+  function buildProfileForEmp(emp, idx) {
+    const t = TIER_TARGETS[idx % 5];
+    const inM = (idx * 7 + 3) % 30;
+    return { id: emp.id, inH: 9, inM, outH: t.outH, outM: t.outM, jitter: t.jitter };
+  }
+
+  const activeEmps = employees.filter((e) => e.status !== 'leave');
+  const allProfiles = activeEmps.map((e, i) => buildProfileForEmp(e, i));
+
+  const PUNCH_DETAIL_LIMIT = 30;
+
   const punchRecords = [];
-  febWorkdays.slice(0, 18).forEach((d) => {
-    punchRecords.push({ id: punchId++, employeeId: 1006, date: d, clockIn: '09:30', clockOut: '16:30' });
-  });
-  febWorkdays.slice(0, 18).forEach((d) => {
-    punchRecords.push({ id: punchId++, employeeId: 1007, date: d, clockIn: '09:30', clockOut: '18:30' });
-  });
-  febWorkdays.forEach((d) => {
-    punchRecords.push({ id: punchId++, employeeId: 1005, date: d, clockIn: '09:00', clockOut: '19:30' });
+  let punchId = 1;
+  const punchProfiles = allProfiles.slice(0, PUNCH_DETAIL_LIMIT);
+  PUNCH_MONTHS.forEach(({ y, m }) => {
+    const days = genWorkdays(y, m);
+    punchProfiles.forEach((prof) => {
+      const skipDays = Math.floor(Math.random() * 2);
+      days.slice(0, days.length - skipDays).forEach((d) => {
+        punchRecords.push({ id: punchId++, employeeId: prof.id, date: d, time: randTime(prof.inH, prof.inM, prof.jitter) });
+        punchRecords.push({ id: punchId++, employeeId: prof.id, date: d, time: randTime(prof.outH, prof.outM, prof.jitter) });
+      });
+    });
   });
 
-  const attendanceRecords = employees.map((e, i) => ({
-    id: i + 1,
-    employeeId: e.id,
-    month: '2025-02',
-    workDays: 20,
-    presentDays: 18 + (i % 3),
-    lateCount: i % 4,
-    leaveDays: i % 2,
-    attendanceRate: 0,
-  }));
-  attendanceRecords.forEach((r) => {
-    r.attendanceRate = Math.min(100, Math.round((r.presentDays / r.workDays) * 100));
+  let attRecId = 1;
+  const attendanceRecords = [];
+  allProfiles.forEach((prof) => {
+    PUNCH_MONTHS.forEach(({ y, m }) => {
+      const workDays = genWorkdays(y, m).length - Math.floor(Math.random() * 2);
+      const baseHours = (prof.outH + prof.outM / 60) - (prof.inH + prof.inM / 60);
+      const jitterH = (Math.random() - 0.5) * (prof.jitter / 30);
+      const avg = Math.round((baseHours + jitterH) * 10) / 10;
+      attendanceRecords.push({
+        id: attRecId++,
+        employeeId: prof.id,
+        month: `${y}-${String(m).padStart(2, '0')}`,
+        avgDailyHours: Math.max(6, Math.min(16, avg)),
+        workDays: Math.max(1, workDays),
+      });
+    });
   });
 
   const kpiLibrary = [];
-
-  const performanceCycles = [
-    { id: 1, name: 'H1 2025', cycleType: 'half_year', startDate: '2025-01-01', endDate: '2025-06-30', status: 'open' },
-    { id: 2, name: 'FY 2024', cycleType: 'year', startDate: '2024-01-01', endDate: '2024-12-31', status: 'closed' },
-  ];
 
   const talentMatrix = employees.slice(4, 14).map((e, i) => ({
     employeeId: e.id,
@@ -424,7 +485,7 @@ function seedAllData(lineId) {
 
   saveKey('orgSettings', { productLineOwnerEmployeeId: 1001 });
   saveKey('orgChangeRequests', []);
-  saveKey('_seedVersion', 13);
+  saveKey('_seedVersion', 17);
 
   return { seeded: true };
 }
@@ -538,4 +599,172 @@ function seedPipelineDemo(lineId) {
   }
 }
 TM.seedPipelineDemo = seedPipelineDemo;
+
+/**
+ * Targeted migration: only re-seed punchRecords + attendanceRecords
+ * with new raw-punch format for existing product lines.
+ */
+function seedAttendanceDemo(lineId) {
+  const lid = lineId != null ? Number(lineId) : 1;
+  const saveKey = (k, v) => TM.saveKeyForLine(lid, k, v);
+  const loadKey = (k) => TM.loadKeyForLine(lid, k, null);
+  const emps = loadKey('employees') || [];
+  if (!emps.length) return;
+
+  function _genWorkdays(year, month) {
+    const days = [];
+    const dim = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= dim; d++) {
+      const dt = new Date(year, month - 1, d);
+      if (dt.getDay() !== 0 && dt.getDay() !== 6) {
+        days.push(`${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`);
+      }
+    }
+    return days;
+  }
+  function _randTime(bH, bM, j) {
+    const t = bH * 60 + bM + Math.floor(Math.random() * j * 2) - j;
+    const h = Math.max(0, Math.min(23, Math.floor(t / 60)));
+    const m = Math.max(0, Math.min(59, t % 60));
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  }
+
+  const tiers = [
+    { outH: 18, outM: 10, j: 10 },
+    { outH: 18, outM: 50, j: 10 },
+    { outH: 19, outM: 20, j: 8  },
+    { outH: 19, outM: 50, j: 10 },
+    { outH: 20, outM: 25, j: 12 },
+  ];
+  const active = emps.filter((e) => e.status !== 'leave');
+  const profiles = active.map((e, i) => {
+    const t = tiers[i % 5];
+    return { id: e.id, inH: 9, inM: (i * 7 + 3) % 30, outH: t.outH, outM: t.outM, j: t.j };
+  });
+
+  const months = [{y:2025,m:10},{y:2025,m:11},{y:2025,m:12},{y:2026,m:1},{y:2026,m:2},{y:2026,m:3}];
+  const DETAIL_LIMIT = 30;
+
+  const punches = [];
+  let pid = 1;
+  const punchProfs = profiles.slice(0, DETAIL_LIMIT);
+  months.forEach(({y,m}) => {
+    const days = _genWorkdays(y,m);
+    punchProfs.forEach((p) => {
+      const skip = Math.floor(Math.random()*2);
+      days.slice(0, days.length - skip).forEach((d) => {
+        punches.push({ id: pid++, employeeId: p.id, date: d, time: _randTime(p.inH,p.inM,p.j) });
+        punches.push({ id: pid++, employeeId: p.id, date: d, time: _randTime(p.outH,p.outM,p.j) });
+      });
+    });
+  });
+
+  let rid = 1;
+  const records = [];
+  profiles.forEach((p) => {
+    months.forEach(({y,m}) => {
+      const wd = _genWorkdays(y,m).length - Math.floor(Math.random()*2);
+      const baseH = (p.outH + p.outM / 60) - (p.inH + p.inM / 60);
+      const jH = (Math.random() - 0.5) * (p.j / 30);
+      const avg = Math.round((baseH + jH) * 10) / 10;
+      records.push({
+        id: rid++,
+        employeeId: p.id,
+        month: `${y}-${String(m).padStart(2,'0')}`,
+        avgDailyHours: Math.max(6, Math.min(16, avg)),
+        workDays: Math.max(1, wd),
+      });
+    });
+  });
+
+  saveKey('punchRecords', punches);
+  saveKey('attendanceRecords', records);
+}
+TM.seedAttendanceDemo = seedAttendanceDemo;
+
+function seedPerformanceDemo(lineId) {
+  const lid = lineId != null ? Number(lineId) : 1;
+  const saveKey = (k, v) => TM.saveKeyForLine(lid, k, v);
+  const emps = TM.loadKeyForLine(lid, 'employees', []) || [];
+  if (!emps.length) return;
+
+  const cycles = [
+    { id: 1, name: 'H1 2022', cycleType: 'half_year', startDate: '2022-01-01', endDate: '2022-06-30', status: 'closed' },
+    { id: 2, name: 'FY 2022', cycleType: 'year', startDate: '2022-01-01', endDate: '2022-12-31', status: 'closed' },
+    { id: 3, name: 'H1 2023', cycleType: 'half_year', startDate: '2023-01-01', endDate: '2023-06-30', status: 'closed' },
+    { id: 4, name: 'FY 2023', cycleType: 'year', startDate: '2023-01-01', endDate: '2023-12-31', status: 'closed' },
+    { id: 5, name: 'H1 2024', cycleType: 'half_year', startDate: '2024-01-01', endDate: '2024-06-30', status: 'closed' },
+    { id: 6, name: 'FY 2024', cycleType: 'year', startDate: '2024-01-01', endDate: '2024-12-31', status: 'closed' },
+    { id: 7, name: 'H1 2025', cycleType: 'half_year', startDate: '2025-01-01', endDate: '2025-06-30', status: 'open' },
+  ];
+  saveKey('performanceCycles', cycles);
+
+  const GRADES = ['A+', 'A', 'A-', 'B+', 'B', 'C', 'C-'];
+  const WEIGHTS = [3, 10, 15, 30, 25, 12, 5];
+  const cumW = []; let s = 0;
+  WEIGHTS.forEach((w) => { s += w; cumW.push(s); });
+  function seeded(seed) { let x = seed; return () => { x = (x * 1103515245 + 12345) & 0x7fffffff; return x / 0x7fffffff; }; }
+  function pick(rng, bias) {
+    const r = rng() * 100;
+    let idx = cumW.findIndex((c) => r < c);
+    if (idx < 0) idx = 4;
+    idx = Math.max(0, Math.min(GRADES.length - 1, idx + bias));
+    return GRADES[idx];
+  }
+
+  const active = emps.filter((e) => e.status !== 'leave');
+  const reviews = [];
+  let rid = 1;
+  active.forEach((e) => {
+    const rng = seeded(e.id * 7 + 31);
+    const bias = Math.floor(rng() * 3) - 1;
+    const hireY = Number(String(e.hireDate || '2024').slice(0, 4));
+    const hireM = Number(String(e.hireDate || '2024-01').slice(5, 7)) || 1;
+    cycles.forEach((cy) => {
+      const cyY = Number(cy.startDate.slice(0, 4));
+      const cyM = Number(cy.startDate.slice(5, 7));
+      if (cyY < hireY || (cyY === hireY && cyM < hireM)) return;
+      if (cy.id === 7) {
+        const roll = rng();
+        let st, rmG, fG;
+        rmG = pick(rng, bias);
+        if (roll < 0.25) { st = 'rm_pending'; rmG = ''; fG = ''; }
+        else if (roll < 0.45) { st = 'in_approval'; fG = ''; }
+        else if (roll < 0.65) { st = 'pl_approved'; fG = ''; }
+        else { st = 'finalized'; fG = rmG; }
+        reviews.push({
+          id: rid++, employeeId: e.id, reviewerId: e.managerId || 1001,
+          cycleId: cy.id, rmInitialGrade: rmG, finalGrade: fG, status: st,
+          rmComment: st !== 'rm_pending' ? 'H1 2025 评估评语' : '',
+          outputDescription: st !== 'rm_pending' ? '本周期产出总结' : '',
+          historyPerformance: '', comments: '', devAdvice: '',
+          approvalChain: [], approvalStepIndex: 0,
+          pendingApproverId: st === 'rm_pending' ? (e.managerId || 1001) : null,
+          approvalLog: [], prevCycleAvgHours: null,
+          communicationNotes: '', communicatedAt: null, appealDeadline: null,
+          calibratedBy: st === 'finalized' ? 1001 : null,
+          calibratedAt: st === 'finalized' ? '2025-03-28' : null,
+          createdAt: '2025-03-15',
+        });
+      } else {
+        const g = pick(rng, bias);
+        reviews.push({
+          id: rid++, employeeId: e.id, reviewerId: e.managerId || 1001,
+          cycleId: cy.id, rmInitialGrade: g, finalGrade: g, status: 'finalized',
+          rmComment: cy.name + ' 绩效评语', outputDescription: '产出符合预期',
+          historyPerformance: '', comments: '', devAdvice: '',
+          approvalChain: [], approvalStepIndex: 0, pendingApproverId: null,
+          approvalLog: [{ approverId: e.managerId || 1001, at: cy.endDate, action: 'calibrate', note: 'HRBP 校准' }],
+          prevCycleAvgHours: null,
+          communicationNotes: '已沟通', communicatedAt: cy.endDate, appealDeadline: null,
+          calibratedBy: 1001, calibratedAt: cy.endDate,
+          createdAt: cy.startDate,
+        });
+      }
+    });
+  });
+  saveKey('performanceReviews', reviews);
+}
+TM.seedPerformanceDemo = seedPerformanceDemo;
+
 })(window.TM);

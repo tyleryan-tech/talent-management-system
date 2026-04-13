@@ -178,6 +178,57 @@ function lineScopedSave(key, value) {
   window.TM.saveKeyForLine(lid, key, value);
 }
 
+let _persistTimer = null;
+const _dirtyKeys = new Set();
+
+function schedulePersistAll(store, options) {
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    store._doPersistAll(options);
+  }, 300);
+}
+
+const ALL_PERSIST_KEYS = [
+  'employees', 'departments', 'positions', 'leaveRequests', 'performanceReviews',
+  'trainings', 'employeeTrainings', 'users', 'attendanceRules', 'attendanceRecords',
+  'punchRecords', 'kpiLibrary', 'performanceCycles', 'talentMatrix', 'successionPlans',
+  'notifications', 'positionRecruitTags', 'recruitmentCandidates',
+  'recruitmentPositionMetrics', 'recruitmentPipeline', 'interviewerPool',
+  'orgSettings', 'orgChangeRequests', 'rosterColumnSettings',
+];
+
+/** 域注册表：将 state key 映射到业务域名称 */
+const DOMAIN_REGISTRY = (() => {
+  const domains = window.TM._domains || {};
+  const keyToDomain = {};
+  Object.entries(domains).forEach(([domainName, def]) => {
+    (def.stateKeys || []).forEach((k) => { keyToDomain[k] = domainName; });
+  });
+  return { domains, keyToDomain };
+})();
+
+/** 获取某个 state key 所属的业务域 */
+function getDomainForKey(key) {
+  return DOMAIN_REGISTRY.keyToDomain[key] || 'unknown';
+}
+
+/** 获取所有业务域名称列表 */
+function getAllDomains() {
+  return Object.keys(DOMAIN_REGISTRY.domains);
+}
+
+/** 按域获取 dirty keys 分组 */
+function groupDirtyKeysByDomain(dirtyKeys) {
+  const groups = {};
+  dirtyKeys.forEach((k) => {
+    const domain = getDomainForKey(k);
+    if (!groups[domain]) groups[domain] = [];
+    groups[domain].push(k);
+  });
+  return groups;
+}
+
 function countLate(list, workStart) {
   const ws = parseClock(workStart || '09:30');
   if (ws == null) return 0;
@@ -330,41 +381,44 @@ window.TM.useDataStore = defineStore('data', {
       );
       this.syncEmployeeLinkedDataFromRoster();
       try {
-        this.persistAll();
+        this.persistAllSync();
       } catch (_) {
         /* ignore */
       }
     },
-    persistAll(options) {
+    _doPersistAll(options) {
       const skipRemote = options && options.skipRemote === true;
-      lineScopedSave('employees', this.employees);
-      lineScopedSave('departments', this.departments);
-      lineScopedSave('positions', this.positions);
-      lineScopedSave('leaveRequests', this.leaveRequests);
-      lineScopedSave('performanceReviews', this.performanceReviews);
-      lineScopedSave('trainings', this.trainings);
-      lineScopedSave('employeeTrainings', this.employeeTrainings);
-      lineScopedSave('users', this.users);
-      lineScopedSave('attendanceRules', this.attendanceRules);
-      lineScopedSave('attendanceRecords', this.attendanceRecords);
-      lineScopedSave('punchRecords', this.punchRecords);
-      lineScopedSave('kpiLibrary', this.kpiLibrary);
-      lineScopedSave('performanceCycles', this.performanceCycles);
-      lineScopedSave('talentMatrix', this.talentMatrix);
-      lineScopedSave('successionPlans', this.successionPlans);
-      lineScopedSave('notifications', this.notifications);
-      lineScopedSave('positionRecruitTags', this.positionRecruitTags || {});
-      lineScopedSave('recruitmentCandidates', this.recruitmentCandidates || []);
-      lineScopedSave('recruitmentPositionMetrics', this.recruitmentPositionMetrics || {});
-      lineScopedSave('recruitmentPipeline', this.recruitmentPipeline || []);
-      lineScopedSave('interviewerPool', this.interviewerPool || []);
-      lineScopedSave('orgSettings', this.orgSettings || {});
-      lineScopedSave('orgChangeRequests', this.orgChangeRequests || []);
-      lineScopedSave('rosterColumnSettings', this.rosterColumnSettings);
+      const keysToWrite = _dirtyKeys.size > 0 ? [..._dirtyKeys].filter((k) => ALL_PERSIST_KEYS.includes(k)) : ALL_PERSIST_KEYS;
+      _dirtyKeys.clear();
+      const OBJ_KEYS = new Set(['positionRecruitTags', 'attendanceRules', 'orgSettings', 'recruitmentPositionMetrics']);
+      keysToWrite.forEach((k) => {
+        lineScopedSave(k, this[k] ?? (OBJ_KEYS.has(k) ? {} : []));
+      });
+      if (window.TM._DEBUG_PERSIST) {
+        const groups = groupDirtyKeysByDomain(keysToWrite);
+        console.debug('[dataStore] persist domains:', groups);
+      }
       const ss = window.TM.serverSync;
-      if (ss && ss.isEnabled && ss.isEnabled() && !skipRemote && !ss.isApplyingRemote) {
+      if (ss && ss.isEnabled && ss.isEnabled() && ss.getToken && ss.getToken() && !skipRemote && !ss.isApplyingRemote) {
         if (typeof ss.scheduleWorkspacePush === 'function') ss.scheduleWorkspacePush();
       }
+    },
+    _markDirty(...keys) {
+      keys.forEach((k) => _dirtyKeys.add(k));
+    },
+    persistAll(options) {
+      if (_dirtyKeys.size === 0) ALL_PERSIST_KEYS.forEach((k) => _dirtyKeys.add(k));
+      schedulePersistAll(this, options);
+    },
+    persistAllSync(options) {
+      if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+      if (_dirtyKeys.size === 0) ALL_PERSIST_KEYS.forEach((k) => _dirtyKeys.add(k));
+      this._doPersistAll(options);
+    },
+    persistKeys(...keys) {
+      keys.forEach((k) => {
+        if (ALL_PERSIST_KEYS.includes(k)) lineScopedSave(k, this[k] ?? []);
+      });
     },
     /**
      * 以花名册为权威：清理无效员工引用；在职/试用若无九宫格则补默认 B/M；离职从九宫格移除；
@@ -418,12 +472,16 @@ window.TM.useDataStore = defineStore('data', {
         return u;
       });
       this.interviewerPool = (this.interviewerPool || []).filter((p) => empIds.has(Number(p.employeeId)));
+      this._markDirty('talentMatrix', 'performanceReviews', 'leaveRequests',
+        'employeeTrainings', 'notifications', 'attendanceRecords', 'punchRecords',
+        'successionPlans', 'users', 'interviewerPool');
     },
     // 员工
     addEmployee(row) {
       const id = uid(this.employees);
       this.employees.push({ ...EMPLOYEE_EXTRA_DEFAULTS, ...row, id });
       this.syncEmployeeLinkedDataFromRoster();
+      this._markDirty('employees', 'talentMatrix', 'notifications');
       this.persistAll();
       return id;
     },
@@ -454,6 +512,7 @@ window.TM.useDataStore = defineStore('data', {
         addedIds.push(id);
       });
       this.syncEmployeeLinkedDataFromRoster();
+      this._markDirty('employees', 'talentMatrix', 'notifications');
       this.persistAll();
       return { added: addedIds.length, ids: addedIds };
     },
@@ -482,14 +541,21 @@ window.TM.useDataStore = defineStore('data', {
         );
       const removed = before - this.employees.length;
       this.syncEmployeeLinkedDataFromRoster();
+      this._markDirty('employees', 'talentMatrix', 'performanceReviews', 'notifications',
+        'attendanceRecords', 'punchRecords', 'leaveRequests', 'employeeTrainings', 'successionPlans', 'orgSettings');
       this.persistAll();
       return { removed };
     },
     updateEmployee(id, patch) {
       const i = this.employees.findIndex((e) => e.id === id);
       if (i >= 0) {
+        const oldManagerId = this.employees[i].managerId;
         this.employees[i] = { ...this.employees[i], ...patch };
         this.syncEmployeeLinkedDataFromRoster();
+        this._markDirty('employees');
+        if (patch.managerId != null && Number(patch.managerId) !== Number(oldManagerId)) {
+          this._rebuildPendingApprovalChains(id);
+        }
         this.persistAll();
       }
     },
@@ -499,6 +565,7 @@ window.TM.useDataStore = defineStore('data', {
     addDepartment(row) {
       const id = uid(this.departments);
       this.departments.push({ ...row, id, hcPlan: Number(row.hcPlan) || 0 });
+      this._markDirty('departments');
       this.persistAll();
       return id;
     },
@@ -506,12 +573,24 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.departments.findIndex((d) => d.id === id);
       if (i < 0) return;
       this.departments[i] = { ...this.departments[i], hcPlan: Math.max(0, Number(val) || 0) };
+      this._markDirty('departments');
       this.persistAll();
     },
     updateDepartment(id, patch) {
       const i = this.departments.findIndex((d) => d.id === id);
       if (i >= 0) {
+        const oldName = this.departments[i].name;
         this.departments[i] = { ...this.departments[i], ...patch };
+        const newName = this.departments[i].name;
+        if (oldName && newName && oldName !== newName) {
+          const oldLower = oldName.trim().toLowerCase();
+          (this.recruitmentPipeline || []).forEach((c) => {
+            if (String(c.team || '').trim().toLowerCase() === oldLower) {
+              c.team = newName;
+            }
+          });
+          this._markDirty('departments', 'recruitmentPipeline');
+        }
         this.persistAll();
       }
     },
@@ -522,7 +601,16 @@ window.TM.useDataStore = defineStore('data', {
         if (k.startsWith(`${did}-`)) delete next[k];
       });
       this.positionRecruitTags = next;
-      this.departments = this.departments.filter((d) => d.id !== id);
+      const parent = this.departments.find((d) => d.id === did)?.parentId || null;
+      this.departments.filter((d) => d.parentId === did).forEach((child) => {
+        child.parentId = parent;
+      });
+      this.departments = this.departments.filter((d) => d.id !== did);
+      this.employees.forEach((e) => {
+        if (Number(e.departmentId) === did) e.departmentId = parent;
+      });
+      this.positions = this.positions.filter((p) => p.departmentId !== did);
+      this._markDirty('departments', 'employees', 'positions', 'positionRecruitTags');
       this.persistAll();
     },
     addPosition(row) {
@@ -539,6 +627,7 @@ window.TM.useDataStore = defineStore('data', {
         departmentId: depId,
         reportingManagerId: row.reportingManagerId || null,
       });
+      this._markDirty('positions');
       this.persistAll();
       return id;
     },
@@ -551,6 +640,7 @@ window.TM.useDataStore = defineStore('data', {
       if (!trades.includes(name)) return false;
       const depId = Number(merged.departmentId);
       if (Number.isNaN(depId)) return false;
+      const oldName = this.positions[i].name;
       this.positions[i] = {
         ...merged,
         id: this.positions[i].id,
@@ -559,21 +649,47 @@ window.TM.useDataStore = defineStore('data', {
         level: normalizeJobLevel(merged.level),
         reportingManagerId: merged.reportingManagerId || null,
       };
+      if (oldName && name && oldName !== name) {
+        const oldLower = oldName.trim().toLowerCase();
+        (this.recruitmentPipeline || []).forEach((c) => {
+          if (String(c.position || '').trim().toLowerCase() === oldLower) {
+            c.position = name;
+          }
+        });
+        (this.interviewerPool || []).forEach((iv) => {
+          if (String(iv.jobTrade || '').trim().toLowerCase() === oldLower) {
+            iv.jobTrade = name;
+          }
+        });
+        this._markDirty('positions', 'recruitmentPipeline', 'interviewerPool');
+      }
       this.persistAll();
       return true;
     },
     removePosition(id) {
       const pid = Number(id);
+      const pos = this.positions.find((p) => p.id === pid);
+      const posName = pos?.name;
       const next = { ...(this.positionRecruitTags || {}) };
       Object.keys(next).forEach((k) => {
         if (k.endsWith(`-${pid}`)) delete next[k];
       });
       this.positionRecruitTags = next;
-      this.positions = this.positions.filter((p) => p.id !== id);
+      this.positions = this.positions.filter((p) => p.id !== pid);
+      this.employees.forEach((e) => {
+        if (Number(e.positionId) === pid) e.positionId = null;
+      });
+      if (posName) {
+        const nameLower = posName.trim().toLowerCase();
+        this.interviewerPool = (this.interviewerPool || []).filter((iv) =>
+          String(iv.jobTrade || '').trim().toLowerCase() !== nameLower);
+      }
+      this._markDirty('positions', 'employees', 'positionRecruitTags', 'interviewerPool');
       this.persistAll();
     },
     updateOrgSettings(patch) {
       this.orgSettings = { ...this.orgSettings, ...patch };
+      this._markDirty('orgSettings');
       this.persistAll();
     },
     /**
@@ -619,6 +735,7 @@ window.TM.useDataStore = defineStore('data', {
         row.log = [{ action: 'auto', at: now, note: skipApproval ? 'HRBP/负责人操作，免审批' : '无审批人链，已自动生效' }];
       }
       this.orgChangeRequests = [...(this.orgChangeRequests || []), row];
+      this._markDirty('orgChangeRequests');
       this.persistAll();
       return row;
     },
@@ -642,6 +759,7 @@ window.TM.useDataStore = defineStore('data', {
         const arr = [...this.orgChangeRequests];
         arr[i] = next;
         this.orgChangeRequests = arr;
+        this._markDirty('orgChangeRequests');
         this.persistAll();
         return true;
       }
@@ -654,6 +772,7 @@ window.TM.useDataStore = defineStore('data', {
       const arr = [...this.orgChangeRequests];
       arr[i] = next;
       this.orgChangeRequests = arr;
+      this._markDirty('orgChangeRequests');
       this.persistAll();
       return true;
     },
@@ -673,6 +792,7 @@ window.TM.useDataStore = defineStore('data', {
       const arr = [...this.orgChangeRequests];
       arr[i] = next;
       this.orgChangeRequests = arr;
+      this._markDirty('orgChangeRequests');
       this.persistAll();
       return true;
     },
@@ -739,6 +859,7 @@ window.TM.useDataStore = defineStore('data', {
       const tags = { ...(this.positionRecruitTags || {}) };
       tags[k] = { priority };
       this.positionRecruitTags = tags;
+      this._markDirty('positionRecruitTags');
       this.persistAll();
     },
     togglePositionRecruit(deptId, positionId) {
@@ -747,6 +868,7 @@ window.TM.useDataStore = defineStore('data', {
       if (normalizeRecruitTagValue(tags[k])) delete tags[k];
       else tags[k] = { priority: 'medium' };
       this.positionRecruitTags = tags;
+      this._markDirty('positionRecruitTags');
       this.persistAll();
     },
     setPositionRecruitTagged(deptId, positionId, on) {
@@ -755,6 +877,7 @@ window.TM.useDataStore = defineStore('data', {
       if (on) tags[k] = { priority: 'medium' };
       else delete tags[k];
       this.positionRecruitTags = tags;
+      this._markDirty('positionRecruitTags');
       this.persistAll();
     },
     // 请假
@@ -762,12 +885,14 @@ window.TM.useDataStore = defineStore('data', {
       const r = this.leaveRequests.find((x) => x.id === id);
       if (r) {
         r.status = status;
+        this._markDirty('leaveRequests');
         this.persistAll();
       }
     },
     addLeaveRequest(row) {
       const id = uid(this.leaveRequests);
       this.leaveRequests.push({ ...row, id, createdAt: row.createdAt || new Date().toISOString().slice(0, 10) });
+      this._markDirty('leaveRequests');
       this.persistAll();
       return id;
     },
@@ -776,35 +901,81 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.performanceReviews.findIndex((x) => x.id === id);
       if (i >= 0) {
         this.performanceReviews[i] = { ...this.performanceReviews[i], ...patch };
+        this._markDirty('performanceReviews');
         this.persistAll();
       }
     },
     addPerformanceReview(row) {
       const id = uid(this.performanceReviews);
       this.performanceReviews.push({ ...row, id });
+      this._markDirty('performanceReviews');
       this.persistAll();
       return id;
     },
     /** RM 提交初评并进入逐级审批（无上级时直接归档） */
-    submitRmPerformanceReview(reviewId, payload) {
+    /**
+     * 当员工的 managerId 变更时，重建该员工所有进行中（rm_pending / in_approval）绩效评审的审批链
+     */
+    _rebuildPendingApprovalChains(employeeId) {
+      const TM = window.TM;
+      if (typeof TM.buildApprovalChainAboveRm !== 'function') return;
+      const eid = Number(employeeId);
+      this.performanceReviews.forEach((r) => {
+        if (Number(r.employeeId) !== eid) return;
+        if (r.status !== 'rm_pending' && r.status !== 'in_approval') return;
+        const emp = this.employees.find((e) => e.id === eid);
+        if (!emp || !emp.managerId) return;
+        const newReviewerId = emp.managerId;
+        const newChain = TM.buildApprovalChainAboveRm(this, newReviewerId);
+        r.reviewerId = newReviewerId;
+        r.approvalChain = newChain;
+        if (r.status === 'rm_pending') {
+          r.pendingApproverId = newReviewerId;
+          r.approvalStepIndex = 0;
+        } else if (r.status === 'in_approval') {
+          const currentApprover = Number(r.pendingApproverId);
+          const newIdx = newChain.indexOf(currentApprover);
+          if (newIdx >= 0) {
+            r.approvalStepIndex = newIdx;
+          } else {
+            r.status = 'rm_pending';
+            r.pendingApproverId = newReviewerId;
+            r.approvalStepIndex = 0;
+          }
+        }
+      });
+      this._markDirty('performanceReviews');
+    },
+    /** actorOptions: { actorId, isHrbp } — 允许 RM 上级/HRBP 代评 */
+    submitRmPerformanceReview(reviewId, payload, actorOptions) {
       const TM = window.TM;
       const grades = TM.PERF_GRADE_OPTIONS;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
       const r = this.performanceReviews[i];
       if (r.status !== 'rm_pending') return false;
+
+      const actorId = actorOptions?.actorId != null ? Number(actorOptions.actorId) : Number(r.reviewerId);
+      const isHrbp = !!actorOptions?.isHrbp;
+      const canAct = actorId === Number(r.reviewerId)
+        || (typeof TM.isManagerOf === 'function' && TM.isManagerOf(this, actorId, r.reviewerId))
+        || isHrbp;
+      if (!canAct) return false;
+
       const g = String(payload.rmInitialGrade || '').trim();
       if (!grades.includes(g)) return false;
       const outDesc = String(payload.outputDescription || '').trim();
       if (!outDesc) return false;
       const chain = TM.buildApprovalChainAboveRm(this, r.reviewerId);
       const today = new Date().toISOString().slice(0, 10);
-      const log = [...(r.approvalLog || []), { approverId: r.reviewerId, at: today, action: 'submit', note: 'RM 提交初评' }];
+      const proxyNote = actorId !== Number(r.reviewerId) ? `（由 ${this._empMap.get(actorId)?.name || actorId} 代评）` : '';
+      const log = [...(r.approvalLog || []), { approverId: actorId, at: today, action: 'submit', note: 'RM 提交初评' + proxyNote }];
       const base = {
         ...r,
         historyPerformance: String(payload.historyPerformance || '').trim(),
         outputDescription: outDesc,
         rmInitialGrade: g,
+        rmComment: String(payload.rmComment || '').trim(),
         prevCycleAvgHours: payload.prevCycleAvgHours != null && payload.prevCycleAvgHours !== ''
           ? Math.round(Number(payload.prevCycleAvgHours) * 10) / 10
           : null,
@@ -815,95 +986,174 @@ window.TM.useDataStore = defineStore('data', {
       };
       if (!chain.length) {
         this.performanceReviews[i] = {
-          ...base,
-          approvalStepIndex: 0,
-          pendingApproverId: null,
-          finalGrade: g,
-          status: 'finalized',
+          ...base, approvalStepIndex: 0, pendingApproverId: null,
+          finalGrade: '', status: 'pl_approved',
         };
       } else {
         this.performanceReviews[i] = {
-          ...base,
-          approvalStepIndex: 0,
-          pendingApproverId: chain[0],
-          finalGrade: '',
-          status: 'in_approval',
+          ...base, approvalStepIndex: 0, pendingApproverId: chain[0],
+          finalGrade: '', status: 'in_approval',
         };
       }
+      this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
-    /** 逐级审批：当前待办人通过 */
-    approvePerformanceReview(reviewId, actorEmployeeId, note) {
+    /** 逐级审批：当前待办人通过（可同时校准等级）；末级审批后进入 pl_approved；支持上级/HRBP 代审批 */
+    approvePerformanceReview(reviewId, actorEmployeeId, note, adjustedGrade) {
+      const TM = window.TM;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
       const r = this.performanceReviews[i];
-      if (r.status !== 'in_approval' || Number(r.pendingApproverId) !== Number(actorEmployeeId)) return false;
+      if (r.status !== 'in_approval') return false;
+
+      const pendingId = Number(r.pendingApproverId);
+      const actorId = Number(actorEmployeeId);
+      const auth = TM.useAuthStore?.();
+      const isHrbp = !!(auth && (auth.isHrbp || auth.isSuperAdmin));
+      const canAct = actorId === pendingId
+        || (typeof TM.isManagerOf === 'function' && TM.isManagerOf(this, actorId, pendingId))
+        || isHrbp;
+      if (!canAct) return false;
+
       const chain = r.approvalChain || [];
-      const idx = chain.indexOf(Number(actorEmployeeId));
+      const idx = chain.indexOf(pendingId);
       if (idx < 0) return false;
       const today = new Date().toISOString().slice(0, 10);
+      const grades = TM.PERF_GRADE_OPTIONS;
+      const newGrade = adjustedGrade && grades.includes(String(adjustedGrade).trim())
+        ? String(adjustedGrade).trim() : null;
+      const proxyNote = actorId !== pendingId ? `（由 ${this._empMap.get(actorId)?.name || actorId} 代审批）` : '';
       const log = [...(r.approvalLog || []), {
-        approverId: actorEmployeeId,
-        at: today,
-        action: 'approve',
-        note: String(note || '').trim(),
+        approverId: actorId, at: today, action: 'approve',
+        note: String(note || '').trim() + (newGrade && newGrade !== r.rmInitialGrade ? ` [等级调整为 ${newGrade}]` : '') + proxyNote,
       }];
+      const gradeUpdate = newGrade ? { rmInitialGrade: newGrade } : {};
       if (idx >= chain.length - 1) {
-        const fg = String(r.rmInitialGrade || 'B').trim();
         this.performanceReviews[i] = {
-          ...r,
-          approvalStepIndex: chain.length,
-          pendingApproverId: null,
-          approvalLog: log,
-          finalGrade: fg,
-          status: 'finalized',
+          ...r, ...gradeUpdate, approvalStepIndex: chain.length, pendingApproverId: null,
+          approvalLog: log, status: 'pl_approved',
         };
       } else {
         const next = chain[idx + 1];
         this.performanceReviews[i] = {
-          ...r,
-          approvalStepIndex: idx + 1,
-          pendingApproverId: next,
-          approvalLog: log,
+          ...r, ...gradeUpdate, approvalStepIndex: idx + 1, pendingApproverId: next, approvalLog: log,
         };
       }
+      this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
-    /** 逐级审批：驳回至 RM 修改 */
+    /** 逐级审批：驳回到上一级审批人校准（若已在第一级则退回 RM）；支持上级/HRBP 代驳回 */
     rejectPerformanceReview(reviewId, actorEmployeeId, note) {
+      const TM = window.TM;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
       const r = this.performanceReviews[i];
-      if (r.status !== 'in_approval' || Number(r.pendingApproverId) !== Number(actorEmployeeId)) return false;
+      if (r.status !== 'in_approval') return false;
+
+      const pendingId = Number(r.pendingApproverId);
+      const actorId = Number(actorEmployeeId);
+      const auth = TM.useAuthStore?.();
+      const isHrbp = !!(auth && (auth.isHrbp || auth.isSuperAdmin));
+      const canAct = actorId === pendingId
+        || (typeof TM.isManagerOf === 'function' && TM.isManagerOf(this, actorId, pendingId))
+        || isHrbp;
+      if (!canAct) return false;
+
+      const chain = r.approvalChain || [];
+      const idx = chain.indexOf(pendingId);
+      if (idx < 0) return false;
       const today = new Date().toISOString().slice(0, 10);
+      const proxyNote = actorId !== pendingId ? `（由 ${this._empMap.get(actorId)?.name || actorId} 代驳回）` : '';
       const log = [...(r.approvalLog || []), {
-        approverId: actorEmployeeId,
-        at: today,
-        action: 'reject',
-        note: String(note || '').trim(),
+        approverId: actorId, at: today, action: 'reject', note: String(note || '').trim() + proxyNote,
       }];
-      this.performanceReviews[i] = {
-        ...r,
-        status: 'rm_pending',
-        approvalStepIndex: 0,
-        pendingApproverId: r.reviewerId,
-        approvalLog: log,
-        finalGrade: '',
-      };
+      if (idx > 0) {
+        const prev = chain[idx - 1];
+        this.performanceReviews[i] = {
+          ...r, status: 'in_approval', approvalStepIndex: idx - 1,
+          pendingApproverId: prev, approvalLog: log,
+        };
+      } else {
+        this.performanceReviews[i] = {
+          ...r, status: 'rm_pending', approvalStepIndex: 0,
+          pendingApproverId: r.reviewerId, approvalLog: log, finalGrade: '',
+        };
+      }
+      this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
-    /** 全流程结束后仅 HRBP 可调整最终等级 */
+    /** HRBP 校准：pl_approved → calibrated（待归档） */
+    hrbpCalibrateReview(reviewId, grade, actorId) {
+      const grades = window.TM.PERF_GRADE_OPTIONS;
+      const g = String(grade || '').trim();
+      if (!grades.includes(g)) return false;
+      const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
+      if (i < 0) return false;
+      if (this.performanceReviews[i].status !== 'pl_approved') return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const log = [...(this.performanceReviews[i].approvalLog || []), {
+        approverId: actorId || null, at: today, action: 'calibrate', note: 'HRBP 校准确认',
+      }];
+      this.performanceReviews[i] = {
+        ...this.performanceReviews[i],
+        finalGrade: g, status: 'calibrated',
+        calibratedBy: actorId || null, calibratedAt: today, approvalLog: log,
+      };
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return true;
+    },
+    /** 归档：当前周期所有评估均已校准时，批量归档并同步九宫格 */
+    archiveCycleReviews(cycleId) {
+      const reviews = this.performanceReviews.filter((r) => r.cycleId === cycleId);
+      if (!reviews.length) return false;
+      const allCalibrated = reviews.every((r) => r.status === 'calibrated' || r.status === 'finalized');
+      if (!allCalibrated) return false;
+      const today = new Date().toISOString().slice(0, 10);
+      reviews.forEach((r) => {
+        if (r.status !== 'calibrated') return;
+        const idx = this.performanceReviews.indexOf(r);
+        if (idx < 0) return;
+        const log = [...(r.approvalLog || []), { approverId: null, at: today, action: 'archive', note: '产品线归档' }];
+        this.performanceReviews[idx] = { ...r, status: 'finalized', approvalLog: log };
+        this._syncTalentPerfRating(r.employeeId);
+      });
+      this._markDirty('performanceReviews', 'talentMatrix');
+      this.persistAll();
+      return true;
+    },
+    /** 记录沟通 */
+    recordCommunication(reviewId, notes) {
+      const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
+      if (i < 0) return false;
+      if (this.performanceReviews[i].status !== 'finalized') return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const d = new Date();
+      d.setDate(d.getDate() + 3);
+      const deadline = d.toISOString().slice(0, 10);
+      this.performanceReviews[i] = {
+        ...this.performanceReviews[i],
+        communicationNotes: String(notes || '').trim(),
+        communicatedAt: today,
+        appealDeadline: deadline,
+      };
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return true;
+    },
+    /** 校准阶段可调整等级；归档（finalized）后等级锁定，任何人不可改 */
     hrbpAdjustFinalGrade(reviewId, grade) {
       const grades = window.TM.PERF_GRADE_OPTIONS;
       const g = String(grade || '').trim();
       if (!grades.includes(g)) return false;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
-      if (this.performanceReviews[i].status !== 'finalized') return false;
+      if (this.performanceReviews[i].status !== 'calibrated') return false;
       this.performanceReviews[i] = { ...this.performanceReviews[i], finalGrade: g };
+      this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
@@ -920,6 +1170,7 @@ window.TM.useDataStore = defineStore('data', {
         read: false,
         createdAt: new Date().toISOString().slice(0, 10),
       });
+      this._markDirty('employeeTrainings', 'notifications');
       this.persistAll();
       return id;
     },
@@ -927,38 +1178,59 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.employeeTrainings.findIndex((x) => x.id === id);
       if (i >= 0) {
         this.employeeTrainings[i] = { ...this.employeeTrainings[i], ...patch };
+        this._markDirty('employeeTrainings');
         this.persistAll();
       }
     },
     // 考勤规则
     saveAttendanceRules(rules) {
       this.attendanceRules = { ...this.attendanceRules, ...rules };
+      this._markDirty('attendanceRules');
       this.persistAll();
     },
-    /** 导入打卡记录；可选 replaceMonth='2025-02' 先删除该月旧数据 */
-    importPunchRecords(rows, replaceMonth) {
-      if (replaceMonth) {
-        const prefix = replaceMonth.length === 7 ? replaceMonth : replaceMonth.slice(0, 7);
-        this.punchRecords = this.punchRecords.filter((p) => !String(p.date).startsWith(prefix));
+    /**
+     * Import raw punch events: each row = { employeeId, date: 'YYYY-MM-DD', time: 'HH:MM' }.
+     * Options: { replace: true } to replace all existing data.
+     */
+    importRawPunches(rows, options) {
+      if (options && options.replace) {
+        this.punchRecords = [];
       }
-      rows.forEach((row) => {
-        const id = uid(this.punchRecords);
+      const base = this.punchRecords.length
+        ? this.punchRecords.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0)
+        : 0;
+      let nextId = base + 1;
+      (rows || []).forEach((row) => {
+        const eid = Number(row.employeeId);
+        if (Number.isNaN(eid)) return;
         this.punchRecords.push({
-          id,
-          employeeId: Number(row.employeeId),
-          date: String(row.date).trim(),
-          clockIn: String(row.clockIn || '').trim(),
-          clockOut: String(row.clockOut || '').trim(),
+          id: nextId++,
+          employeeId: eid,
+          date: String(row.date || '').trim(),
+          time: String(row.time || '').trim(),
         });
       });
+      this.recomputeAllAttendance();
+      this._markDirty('punchRecords', 'attendanceRecords');
       this.persistAll();
-      let m = null;
-      if (rows.length && rows[0].date) m = String(rows[0].date).slice(0, 7);
-      else if (replaceMonth) m = replaceMonth.length === 7 ? replaceMonth : String(replaceMonth).slice(0, 7);
-      if (m) this.recomputeAttendanceFromPunches(m);
+    },
+    /** Recompute attendanceRecords from raw punchRecords, preserving manually imported avgDailyHours rows. */
+    recomputeAllAttendance() {
+      if (typeof window.TM.attendance?.recomputeRecords !== 'function') return;
+      const punchDerived = window.TM.attendance.recomputeRecords(this.punchRecords);
+      const punchKeys = new Set(punchDerived.map((r) => `${Number(r.employeeId)}_${r.month}`));
+      const manualRows = (this.attendanceRecords || []).filter((r) => {
+        const k = `${Number(r.employeeId)}_${r.month}`;
+        return !punchKeys.has(k) && r.avgDailyHours != null && r.avgDailyHours !== '' && !Number.isNaN(Number(r.avgDailyHours));
+      });
+      let nextId = punchDerived.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
+      manualRows.forEach((r) => { r.id = nextId++; });
+      this.attendanceRecords = [...punchDerived, ...manualRows];
     },
     clearPunchRecords() {
       this.punchRecords = [];
+      this.attendanceRecords = [];
+      this._markDirty('punchRecords', 'attendanceRecords');
       this.persistAll();
     },
     /**
@@ -967,13 +1239,15 @@ window.TM.useDataStore = defineStore('data', {
      */
     importAttendanceAvgDailyHours(rows) {
       const rules = this.attendanceRules || {};
+      const attLookup = new Map();
+      this.attendanceRecords.forEach((r) => attLookup.set(`${Number(r.employeeId)}_${r.month}`, r));
       (rows || []).forEach((item) => {
         const eid = Number(item.employeeId);
         let ym = String(item.ym || '').trim();
         if (ym.length >= 7) ym = ym.slice(0, 7);
         const hrs = Number(item.avgDailyHours);
         if (Number.isNaN(eid) || !/^\d{4}-\d{2}$/.test(ym) || Number.isNaN(hrs) || hrs < 0) return;
-        let row = this.attendanceRecords.find((r) => r.employeeId === eid && r.month === ym);
+        let row = attLookup.get(`${eid}_${ym}`);
         if (!row) {
           row = {
             id: uid(this.attendanceRecords),
@@ -986,10 +1260,12 @@ window.TM.useDataStore = defineStore('data', {
             attendanceRate: null,
           };
           this.attendanceRecords.push(row);
+          attLookup.set(`${eid}_${ym}`, row);
         }
         row.avgDailyHours = Math.round(hrs * 100) / 100;
         applyAvgDailyHoursToAttendanceRow(row, rules);
       });
+      this._markDirty('attendanceRecords');
       this.persistAll();
     },
     /** 规则变更后，重算所有「日均工时导入」行的负荷比与折算工时 */
@@ -1000,6 +1276,7 @@ window.TM.useDataStore = defineStore('data', {
           applyAvgDailyHoursToAttendanceRow(row, rules);
         }
       });
+      this._markDirty('attendanceRecords');
       this.persistAll();
     },
     /**
@@ -1023,10 +1300,15 @@ window.TM.useDataStore = defineStore('data', {
           byEmp.get(eid).push(p);
         });
 
+      const attIdx = new Map();
+      this.attendanceRecords.forEach((r) => {
+        attIdx.set(`${Number(r.employeeId)}_${r.month}`, r);
+      });
+
       this.employees.forEach((emp) => {
         const eid = emp.id;
         const list = byEmp.get(eid) || [];
-        let row = this.attendanceRecords.find((r) => r.employeeId === eid && r.month === ym);
+        let row = attIdx.get(`${eid}_${ym}`);
 
         if (list.length === 0) {
           if (!row) {
@@ -1077,12 +1359,14 @@ window.TM.useDataStore = defineStore('data', {
         row.loadTier = loadTier;
         row.lateCount = countLate(list, rules.workStart);
       });
+      this._markDirty('attendanceRecords');
       this.persistAll();
     },
     // KPI / 周期
     addKpi(row) {
       const id = uid(this.kpiLibrary);
       this.kpiLibrary.push({ ...row, id });
+      this._markDirty('kpiLibrary');
       this.persistAll();
       return id;
     },
@@ -1090,16 +1374,19 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.kpiLibrary.findIndex((x) => x.id === id);
       if (i >= 0) {
         this.kpiLibrary[i] = { ...this.kpiLibrary[i], ...patch };
+        this._markDirty('kpiLibrary');
         this.persistAll();
       }
     },
     removeKpi(id) {
       this.kpiLibrary = this.kpiLibrary.filter((x) => x.id !== id);
+      this._markDirty('kpiLibrary');
       this.persistAll();
     },
     addCycle(row) {
       const id = uid(this.performanceCycles);
       this.performanceCycles.push({ ...row, id });
+      this._markDirty('performanceCycles');
       this.persistAll();
       return id;
     },
@@ -1107,7 +1394,23 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.performanceCycles.findIndex((x) => x.id === id);
       if (i >= 0) {
         this.performanceCycles[i] = { ...this.performanceCycles[i], ...patch };
+        this._markDirty('performanceCycles');
         this.persistAll();
+      }
+    },
+    /**
+     * 根据员工的全部已定档绩效重新计算 A/B/C 评级，并同步更新 talentMatrix.performance
+     */
+    _syncTalentPerfRating(employeeId) {
+      const eid = Number(employeeId);
+      if (Number.isNaN(eid)) return;
+      const TM = window.TM;
+      if (typeof TM.computePerfRatingFromReviews !== 'function') return;
+      const reviews = (this._reviewsByEmp?.get?.(eid)) || this.performanceReviews.filter((r) => Number(r.employeeId) === eid);
+      const rating = TM.computePerfRatingFromReviews(reviews, this.performanceCycles);
+      const row = this.talentMatrix.find((x) => Number(x.employeeId) === eid);
+      if (row && row.performance !== rating) {
+        row.performance = rating;
       }
     },
     // 人才九宫格
@@ -1124,28 +1427,26 @@ window.TM.useDataStore = defineStore('data', {
       const rest = this.talentMatrix.filter((x) => Number(x.employeeId) !== eid);
       rest.push(row);
       this.talentMatrix = rest;
+      this._markDirty('talentMatrix');
       if (!opts || !opts.skipPersist) this.persistAll();
     },
     /** 高潜等场景：九宫格行上的发展计划说明（纯文本） */
     setTalentDevelopmentPlan(employeeId, text) {
       const eid = Number(employeeId);
       if (Number.isNaN(eid)) return;
-      const next = String(text ?? '');
+      const next = String(text ?? '').trim();
       const i = this.talentMatrix.findIndex((x) => Number(x.employeeId) === eid);
       if (i < 0) {
         this.talentMatrix = [...this.talentMatrix, {
-          employeeId: eid,
-          performance: 'B',
-          potential: 'M',
-          developmentPlan: next.trim(),
+          employeeId: eid, performance: 'B', potential: 'M', developmentPlan: next,
         }];
       } else {
         const cur = this.talentMatrix[i];
         const copy = [...this.talentMatrix];
-        copy[i] = { ...cur, developmentPlan: next.trim() };
+        copy[i] = { ...cur, developmentPlan: next };
         this.talentMatrix = copy;
       }
-      this.persistAll();
+      this.persistKeys('talentMatrix');
     },
     // 继任
     upsertSuccession(row) {
@@ -1153,6 +1454,7 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.successionPlans.findIndex((x) => x.id === id);
       if (i >= 0) this.successionPlans[i] = { ...this.successionPlans[i], ...row, id };
       else this.successionPlans.push({ ...row, id });
+      this._markDirty('successionPlans');
       this.persistAll();
     },
     // 用户密码
@@ -1160,6 +1462,7 @@ window.TM.useDataStore = defineStore('data', {
       const u = this.users.find((x) => x.id === userId);
       if (u) {
         u.password = password;
+        this._markDirty('users');
         this.persistAll();
       }
     },
@@ -1217,6 +1520,10 @@ window.TM.useDataStore = defineStore('data', {
       }
     },
     exportSnapshot() {
+      const safeUsers = (this.users || []).map((u) => {
+        const { password, ...rest } = u;
+        return rest;
+      });
       return {
         employees: this.employees,
         departments: this.departments,
@@ -1225,7 +1532,7 @@ window.TM.useDataStore = defineStore('data', {
         performanceReviews: this.performanceReviews,
         trainings: this.trainings,
         employeeTrainings: this.employeeTrainings,
-        users: this.users,
+        users: safeUsers,
         attendanceRules: this.attendanceRules,
         attendanceRecords: this.attendanceRecords,
         punchRecords: this.punchRecords,
@@ -1246,13 +1553,47 @@ window.TM.useDataStore = defineStore('data', {
     },
     setRosterColumnSettings(raw) {
       this.rosterColumnSettings = window.TM.normalizeRosterColumnSettings(raw || undefined);
+      this._markDirty('rosterColumnSettings');
       this.persistAll();
     },
   },
   getters: {
-    employeeById: (state) => (id) => state.employees.find((e) => e.id === id),
-    departmentById: (state) => (id) => state.departments.find((d) => d.id === id),
-    positionById: (state) => (id) => state.positions.find((p) => p.id === id),
+    _empMap: (state) => {
+      const m = new Map();
+      state.employees.forEach((e) => m.set(e.id, e));
+      return m;
+    },
+    _deptMap: (state) => {
+      const m = new Map();
+      state.departments.forEach((d) => m.set(d.id, d));
+      return m;
+    },
+    _posMap: (state) => {
+      const m = new Map();
+      state.positions.forEach((p) => m.set(p.id, p));
+      return m;
+    },
+    _attIdx: (state) => {
+      const m = new Map();
+      (state.attendanceRecords || []).forEach((r) => {
+        const key = Number(r.employeeId);
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(r);
+      });
+      return m;
+    },
+    _reviewsByEmp: (state) => {
+      const m = new Map();
+      (state.performanceReviews || []).forEach((r) => {
+        const key = Number(r.employeeId);
+        if (!m.has(key)) m.set(key, []);
+        m.get(key).push(r);
+      });
+      return m;
+    },
+    employeeById() { return (id) => this._empMap.get(id) || null; },
+    departmentById() { return (id) => this._deptMap.get(id) || null; },
+    positionById() { return (id) => this._posMap.get(id) || null; },
     subordinatesOf: (state) => (managerId) => state.employees.filter((e) => e.managerId === managerId),
   },
 });

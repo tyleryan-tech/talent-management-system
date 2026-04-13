@@ -22,7 +22,9 @@
           email: 'hrbp@company.com',
           password: '123',
           role: 'hrbp',
-          realName: 'HRBP Admin',
+          superAdmin: true,
+          hrbpSubType: 'super_admin',
+          realName: 'HRBP Super Admin',
           employeeId: null,
         },
         {

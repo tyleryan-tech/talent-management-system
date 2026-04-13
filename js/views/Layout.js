@@ -39,6 +39,10 @@
             <i class="fa-solid fa-trash-can fa-fw"></i><span class="product-line-remove-txt">移除产品线</span>
           </button>
         </div>
+        <div v-if="hasDualAccess" class="sidebar-zone-switch">
+          <button type="button" class="zone-btn" :class="{ active: isInHrbpZone }" @click="$router.push('/hrbp/dashboard')"><i class="fa-solid fa-user-shield fa-fw"></i> HRBP</button>
+          <button type="button" class="zone-btn" :class="{ active: !isInHrbpZone }" @click="$router.push('/manager/dashboard')"><i class="fa-solid fa-people-group fa-fw"></i> Manager</button>
+        </div>
         <nav class="side-nav">
           <router-link
             v-for="item in menu"
@@ -93,7 +97,11 @@
 
     const roleLabel = computed(() => {
       if (!auth.currentUser) return '';
-      if (auth.isSuperAdmin) return 'Super Admin';
+      const sub = auth.effectiveSubType;
+      if (sub === 'super_admin') return 'Super Admin';
+      if (sub === 'admin') return 'HRBP 管理员';
+      if (sub === 'intern') return 'HRBP 实习生';
+      if (auth.isProductLineOwner) return '产品线负责人';
       return auth.isHrbp ? 'HRBP' : 'Reporting Manager';
     });
     const navCollapsed = ref(false);
@@ -111,32 +119,47 @@
     onMounted(() => window.addEventListener('tm-toast', showToast));
     onUnmounted(() => window.removeEventListener('tm-toast', showToast));
 
-    const hrbpMenu = [
-      { to: '/hrbp/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high' },
-      { to: '/hrbp/roster', label: 'Roster', icon: 'fa-solid fa-users' },
-      { to: '/hrbp/org', label: 'Organization', icon: 'fa-solid fa-sitemap' },
-      { to: '/hrbp/recruitment', label: 'Recruiting', icon: 'fa-solid fa-user-plus' },
-      { to: '/hrbp/talent', label: 'Talent review', icon: 'fa-solid fa-chess-board' },
-      { to: '/hrbp/performance', label: 'Performance', icon: 'fa-solid fa-chart-line' },
-      { to: '/hrbp/attendance', label: 'Attendance', icon: 'fa-solid fa-clock' },
+    const allHrbpMenuItems = [
+      { to: '/hrbp/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
+      { to: '/hrbp/roster', label: 'Roster', icon: 'fa-solid fa-users', module: 'roster' },
+      { to: '/hrbp/org', label: 'Organization', icon: 'fa-solid fa-sitemap', module: 'org' },
+      { to: '/hrbp/recruitment', label: 'Recruiting', icon: 'fa-solid fa-user-plus', module: 'recruitment' },
+      { to: '/hrbp/talent', label: 'Talent review', icon: 'fa-solid fa-chess-board', module: 'talent' },
+      { to: '/hrbp/performance', label: 'Performance', icon: 'fa-solid fa-chart-line', module: 'performance' },
+      { to: '/hrbp/attendance', label: 'Attendance', icon: 'fa-solid fa-clock', module: 'attendance' },
+      { to: '/hrbp/users', label: '用户管理', icon: 'fa-solid fa-user-shield', superAdminOnly: true },
     ];
+    const hrbpMenu = computed(() => {
+      return allHrbpMenuItems.filter((item) => {
+        if (item.superAdminOnly) return auth.effectiveSubType === 'super_admin';
+        if (item.module) return auth.canAccessModule(item.module);
+        return true;
+      });
+    });
 
-    const mgrMenu = [
-      { to: '/manager/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high' },
-      { to: '/manager/team', label: 'My team', icon: 'fa-solid fa-people-group' },
-      { to: '/manager/performance', label: 'Performance', icon: 'fa-solid fa-clipboard-check' },
-      { to: '/manager/leaves', label: 'Leave approvals', icon: 'fa-solid fa-calendar-check' },
-      { to: '/manager/training', label: 'Training', icon: 'fa-solid fa-graduation-cap' },
-      { to: '/manager/analytics', label: 'Team analytics', icon: 'fa-solid fa-chart-column' },
-      { to: '/manager/org-approvals', label: 'Org approvals', icon: 'fa-solid fa-sitemap' },
+    const allMgrMenuItems = [
+      { to: '/manager/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
+      { to: '/manager/roster', label: '花名册', icon: 'fa-solid fa-people-group', module: 'roster' },
+      { to: '/manager/org', label: '组织管理', icon: 'fa-solid fa-sitemap', module: 'org' },
+      { to: '/manager/recruitment', label: '招聘管理', icon: 'fa-solid fa-user-plus', module: 'recruitment' },
+      { to: '/manager/talent', label: '人才盘点', icon: 'fa-solid fa-chess-board', module: 'talent' },
+      { to: '/manager/performance', label: 'Performance', icon: 'fa-solid fa-clipboard-check', module: 'performance' },
+      { to: '/manager/attendance', label: '考勤', icon: 'fa-solid fa-clock', module: 'attendance' },
     ];
+    const mgrMenu = computed(() =>
+      allMgrMenuItems.filter((item) => auth.canAccessModule(item.module)),
+    );
+
+    const canAccessHrbp = computed(() => auth.isHrbp || auth.isSuperAdmin || auth.isProductLineOwner);
+    const canAccessMgr = computed(() => auth.isManager);
+    const hasDualAccess = computed(() => canAccessHrbp.value && canAccessMgr.value);
 
     const menu = computed(() => {
       if (r.path.startsWith('/profile')) {
-        return auth.isHrbp ? hrbpMenu : mgrMenu;
+        return canAccessHrbp.value ? hrbpMenu.value : mgrMenu.value;
       }
-      if (r.path.startsWith('/hrbp')) return hrbpMenu;
-      return mgrMenu;
+      if (r.path.startsWith('/hrbp')) return hrbpMenu.value;
+      return mgrMenu.value;
     });
 
     const pageTitle = computed(() => {
@@ -144,6 +167,7 @@
       return m?.meta?.title || (auth.isHrbp ? 'HRBP workspace' : 'Manager workspace');
     });
 
+    const isInHrbpZone = computed(() => r.path.startsWith('/hrbp'));
     const routerViewKey = computed(() => `${productLine.currentLineId ?? 0}-${r.fullPath}`);
 
     async function onProductLineChange(ev) {
@@ -189,6 +213,7 @@
       productLine, routerViewKey, onProductLineChange,
       lineModalOpen, newLineName, openLineModal, submitNewLine,
       roleLabel, confirmRemoveProductLine,
+      hasDualAccess, isInHrbpZone,
     };
   },
 };

@@ -50,7 +50,7 @@ function buildReportTree(data, rootId) {
             <tbody>
               <tr v-for="r in reviewsOf(detail.id)" :key="r.id">
                 <td>{{ cycleLabel(r) }}</td>
-                <td>{{ r.status === 'finalized' ? (r.finalGrade || '—') : '—' }}</td>
+                <td>{{ (r.status === 'finalized' || r.status === 'calibrated') ? (r.finalGrade || '—') : '—' }}</td>
                 <td>{{ r.rmInitialGrade || '—' }}</td>
                 <td>{{ perfStatusEn(r.status) }}</td>
               </tr>

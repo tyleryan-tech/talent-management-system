@@ -148,8 +148,28 @@
     return Math.max(0.32, Math.min(1, z));
   }
 
-  /** 部门树 + 每部门下挂载岗位子节点 */
-  function buildTree(deps, parentId, data, depth, ec) {
+  function _buildDeptStats(data) {
+    const empMap = data._empMap;
+    const countByDept = new Map();
+    const filledByDept = new Map();
+    const posByDept = new Map();
+    data.employees.forEach((e) => {
+      if (e.status === 'leave') return;
+      const did = e.departmentId;
+      countByDept.set(did, (countByDept.get(did) || 0) + 1);
+      if (e.positionId != null) {
+        if (!filledByDept.has(did)) filledByDept.set(did, new Set());
+        filledByDept.get(did).add(e.positionId);
+      }
+    });
+    data.positions.forEach((p) => {
+      posByDept.set(p.departmentId, (posByDept.get(p.departmentId) || 0) + 1);
+    });
+    return { empMap, countByDept, filledByDept, posByDept };
+  }
+
+  function buildTree(deps, parentId, data, depth, ec, _stats) {
+    const stats = _stats || _buildDeptStats(data);
     const G = ec.graphic.LinearGradient;
     const tier = Math.min(depth, 2);
     const fills = [
@@ -165,20 +185,17 @@
       .filter((d) => (d.parentId == null ? parentId == null : d.parentId === parentId))
       .sort((a, b) => String(a.name).localeCompare(b.name, 'zh-Hans-CN'))
       .map((d) => {
-        const head = data.employees.find((e) => e.id === d.managerId);
-        const count = data.employees.filter((e) => e.departmentId === d.id && e.status !== 'leave').length;
-        const posCount = data.positions.filter((p) => p.departmentId === d.id).length;
-        const vacantCount = posCount - new Set(
-          data.employees
-            .filter((e) => e.departmentId === d.id && e.status !== 'leave' && e.positionId != null)
-            .map((e) => e.positionId),
-        ).size;
+        const head = stats.empMap.get(d.managerId);
+        const count = stats.countByDept.get(d.id) || 0;
+        const posCount = stats.posByDept.get(d.id) || 0;
+        const filledSet = stats.filledByDept.get(d.id);
+        const vacantCount = posCount - (filledSet ? filledSet.size : 0);
         const sub = head
           ? `${head.name} · HC ${count}/${posCount}` + (vacantCount > 0 ? ` · ${vacantCount} vacant` : '')
           : `HC ${count}/${posCount}` + (vacantCount > 0 ? ` · ${vacantCount} vacant` : '');
         const safeName = String(d.name).replace(/[{}|]/g, '');
         const safeSub = String(sub).replace(/[{}|]/g, '');
-        const subDeptChildren = buildTree(deps, d.id, data, depth + 1, ec);
+        const subDeptChildren = buildTree(deps, d.id, data, depth + 1, ec, stats);
         const posChildren = buildPositionNodes(d.id, data, ec);
         return {
           name: d.name,
@@ -233,34 +250,33 @@
   template: `
     <div class="page-stack">
       <div class="toolbar card pad wrap">
-        <button type="button" class="btn btn-primary" @click="openDept('create')">Add department</button>
-        <button type="button" class="btn btn-secondary" @click="openPos('create')">Add Target HC</button>
+        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-primary" @click="openDept('create')">Add department</button>
+        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPos('create')">Add Target HC</button>
         <span class="muted">拖拽部门行可调整层级关系。HRBP / 产品线负责人操作自动生效；汇报经理操作需审批。</span>
       </div>
       <section class="card pad">
         <h3 class="section-title">Organization change approval</h3>
-        <p class="muted small">增删部门、调整汇报关系、增删改 Target HC 均需逐级审批，<strong>产品线负责人</strong>为最终审批人。汇报经理可在侧边栏 <strong>Org approvals</strong> 中操作。</p>
+        <p class="muted small">增删部门、调整汇报关系、增删改 Target HC 均需逐级审批，<strong>产品线负责人</strong>为最终审批人。</p>
         <p class="muted small">标记<strong>空编招聘</strong>及优先级属于招聘运营操作，<strong>不需要</strong>组织架构审批（与 Recruitment 模块同规则）。</p>
         <label class="field inline" style="margin-bottom:12px">
           <span>Product line owner (final approver)</span>
-          <select v-model.number="orgOwnerId" class="input">
+          <select v-model.number="orgOwnerId" class="input" :disabled="!auth.isHrbp">
             <option v-for="e in data.employees" :key="'own-'+e.id" :value="e.id">{{ e.name }} ({{ e.id }})</option>
           </select>
         </label>
-        <table v-if="orgRequestsSorted.length" class="data-table compact">
+        <table v-if="orgActiveRequests.length" class="data-table compact">
           <thead>
-            <tr><th>Title</th><th>Type</th><th>Status</th><th>Pending approver</th><th>Chain</th><th>Submitted</th><th></th></tr>
+            <tr><th>Title</th><th>Type</th><th>Pending approver</th><th>Chain</th><th>Submitted</th><th></th></tr>
           </thead>
           <tbody>
-            <tr v-for="r in orgRequestsSorted" :key="r.id">
+            <tr v-for="r in orgActiveRequests" :key="r.id">
               <td class="cell-clip">{{ r.title }}</td>
               <td>{{ orgTypeLabel(r.type) }}</td>
-              <td>{{ orgStatusLabel(r.status) }}</td>
               <td>{{ r.pendingApproverId != null ? empName(r.pendingApproverId) : '—' }}</td>
               <td class="cell-clip muted small">{{ chainNames(r.approvalChain) }}</td>
               <td>{{ r.submittedAt }}</td>
               <td class="row-actions">
-                <template v-if="r.status === 'pending' && canApproveAsMe(r)">
+                <template v-if="canApproveAsMe(r) && auth.hasPermission('org.approveChange')">
                   <button type="button" class="btn-link" @click="approveOrgReq(r)">Approve</button>
                   <button type="button" class="btn-link danger" @click="rejectOrgReq(r)">Reject</button>
                 </template>
@@ -268,7 +284,31 @@
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted small">No approval records yet.</p>
+        <p v-else class="muted small">当前没有进行中的审批。</p>
+        <div style="margin-top:10px">
+          <button type="button" class="btn btn-ghost btn-sm" @click="showOrgHistory = !showOrgHistory">
+            <i :class="showOrgHistory ? 'fa-solid fa-chevron-up' : 'fa-solid fa-clock-rotate-left'"></i>
+            {{ showOrgHistory ? '收起历史记录' : '查看历史记录' }}
+            <span v-if="orgHistoryRequests.length" class="muted">({{ orgHistoryRequests.length }})</span>
+          </button>
+        </div>
+        <template v-if="showOrgHistory">
+          <table v-if="orgHistoryRequests.length" class="data-table compact" style="margin-top:8px">
+            <thead>
+              <tr><th>Title</th><th>Type</th><th>Status</th><th>Chain</th><th>Submitted</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in orgHistoryRequests" :key="r.id">
+                <td class="cell-clip">{{ r.title }}</td>
+                <td>{{ orgTypeLabel(r.type) }}</td>
+                <td><span :class="r.status === 'approved' ? 'text-success' : 'text-danger'">{{ orgStatusLabel(r.status) }}</span></td>
+                <td class="cell-clip muted small">{{ chainNames(r.approvalChain) }}</td>
+                <td>{{ r.submittedAt }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="muted small" style="margin-top:8px">暂无历史记录。</p>
+        </template>
       </section>
       <div class="card pad">
         <h3 class="section-title">Department list (drag to adjust hierarchy)</h3>
@@ -299,20 +339,21 @@
               <td class="col-drag" title="Drag to reorder"><i class="fa-solid fa-grip-vertical muted"></i></td>
               <td :style="{ paddingLeft: (12 + row.depth * 16) + 'px' }">
                 <span v-if="row.depth" class="dept-tree-prefix muted">└ </span>{{ row.dept.name }}
-                <button type="button" class="btn-link btn-inline-edit" @click="openDept('edit', row.dept)" title="Edit department"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn-link btn-inline-edit" @click="openDept('edit', row.dept)" title="Edit department"><i class="fa-solid fa-pen-to-square"></i></button>
               </td>
               <td>{{ parentDeptName(row.dept.parentId) }}</td>
               <td>{{ empName(row.dept.managerId) }}</td>
               <td class="hc-plan-cell">
-                <input type="number" min="0" class="hc-plan-input"
+                <input v-if="auth.hasPermission('org.hcPlan')" type="number" min="0" class="hc-plan-input"
                   :value="row.dept.hcPlan || 0"
                   @change="onHcPlanChange(row.dept.id, $event)" />
+                <span v-else>{{ row.dept.hcPlan || 0 }}</span>
               </td>
               <td :class="{ 'text-warn': deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) && (row.dept.hcPlan || 0) > 0 }">{{ deptPositionCount(row.dept.id) }}</td>
               <td>{{ deptOnDutyCount(row.dept.id) }}</td>
               <td>{{ fulfillmentRate(row.dept.id) }}</td>
               <td class="dept-row-actions">
-                <button type="button" class="btn-link"
+                <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn-link"
                   :disabled="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0)"
                   :title="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) ? 'Target HC 已达 HC Plan 上限' : ''"
                   @click.stop="openPos('create', null, row.dept.id)">New HC slot</button>
@@ -339,16 +380,17 @@
           <tbody>
             <tr v-for="row in recruitListRows" :key="row.key">
               <td>
-                <select class="recruit-priority-select" :value="row.priority" @change="onRecruitPriorityChange(row, $event)">
+                <select v-if="auth.hasPermission('org.recruitTag')" class="recruit-priority-select" :value="row.priority" @change="onRecruitPriorityChange(row, $event)">
                   <option value="high">High</option>
                   <option value="medium">Medium</option>
                   <option value="low">Low</option>
                 </select>
+                <span v-else class="recruit-legend" :class="row.priority">{{ row.priority }}</span>
               </td>
               <td>{{ row.deptName }}</td>
               <td>{{ row.positionName }}</td>
               <td>{{ row.level }}</td>
-              <td><button type="button" class="btn-link danger" @click="removeRecruitRow(row)">Clear open tag</button></td>
+              <td><button v-if="auth.hasPermission('org.recruitTag')" type="button" class="btn-link danger" @click="removeRecruitRow(row)">Clear open tag</button></td>
             </tr>
           </tbody>
         </table>
@@ -452,13 +494,13 @@
             </label>
           </div>
           <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
-            <button v-if="slotVacant && !slotRecruiting" type="button" class="btn btn-primary" @click="createRecruitFromSlot">
+            <button v-if="slotVacant && !slotRecruiting && auth.hasPermission('org.recruitTag')" type="button" class="btn btn-primary" @click="createRecruitFromSlot">
               <i class="fa-solid fa-plus"></i> Create recruitment request
             </button>
-            <button v-if="slotVacant" type="button" class="btn" :class="slotRecruiting ? 'btn-secondary' : 'btn-ghost'" @click="toggleRecruitSlot">
+            <button v-if="slotVacant && auth.hasPermission('org.recruitTag')" type="button" class="btn" :class="slotRecruiting ? 'btn-secondary' : 'btn-ghost'" @click="toggleRecruitSlot">
               {{ slotRecruiting ? 'Clear open tag' : 'Mark as open' }}
             </button>
-            <button type="button" class="btn btn-secondary" @click="openPosFromSlot">Edit HC slot</button>
+            <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPosFromSlot">Edit HC slot</button>
             <button type="button" class="btn btn-ghost" @click="closeSlotModal">Close</button>
           </div>
         </div>
@@ -468,6 +510,7 @@
   setup() {
     const data = useDataStore();
     const auth = useAuthStore();
+    const _zs = window.TM.useZoneScope(data);
     const chartRef = ref(null);
     const deptCountBarRef = ref(null);
     let chartInst;
@@ -547,6 +590,9 @@
     });
 
     const orgRequestsSorted = computed(() => [...(data.orgChangeRequests || [])].sort((a, b) => Number(b.id) - Number(a.id)));
+    const orgActiveRequests = computed(() => orgRequestsSorted.value.filter((r) => r.status === 'pending'));
+    const orgHistoryRequests = computed(() => orgRequestsSorted.value.filter((r) => r.status !== 'pending'));
+    const showOrgHistory = ref(false);
 
     function orgTypeLabel(t) {
       return {
@@ -647,6 +693,10 @@
       const fromId = draggingDeptId.value ?? Number(e.dataTransfer.getData('text/plain'));
       dropTargetDeptId.value = null;
       if (!fromId || fromId === targetDept.id) return;
+      if (!auth.hasPermission('org.submitChange')) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '无操作权限：调整部门层级', type: 'error' } }));
+        return;
+      }
       if (!canSetParent(fromId, targetDept.id)) {
         window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: 'Cannot move a department under itself or its descendants', type: 'error' } }));
         return;
@@ -723,24 +773,28 @@
 
     const recruitListRows = computed(() => {
       const tags = data.positionRecruitTags || {};
+      const posMap = data._posMap;
+      const deptMap = data._deptMap;
+      const slotOccupied = new Map();
+      data.employees.forEach((e) => {
+        if (e.status === 'leave' || e.positionId == null) return;
+        slotOccupied.set(e.departmentId + '-' + e.positionId, true);
+      });
       const rows = [];
       Object.keys(tags).forEach((key) => {
         const m = key.match(/^(\d+)-(\d+)$/);
         if (!m) return;
         const deptId = Number(m[1]);
         const positionId = Number(m[2]);
-        const p = data.positions.find((x) => x.id === positionId && x.departmentId === deptId);
-        if (!p) return;
-        const assignees = data.employees.filter(
-          (e) => e.positionId === positionId && e.departmentId === deptId && e.status !== 'leave',
-        );
-        if (assignees.length > 0) return;
+        const p = posMap.get(positionId);
+        if (!p || p.departmentId !== deptId) return;
+        if (slotOccupied.has(deptId + '-' + positionId)) return;
         const priority = data.getPositionRecruitPriority(deptId, positionId) || 'medium';
         rows.push({
           key,
           deptId,
           positionId,
-          deptName: data.departments.find((d) => d.id === deptId)?.name || '—',
+          deptName: deptMap.get(deptId)?.name || '—',
           positionName: p.name,
           level: p.level || '—',
           priority,
@@ -759,7 +813,7 @@
     }
 
     function deptOnDutyCount(deptId) {
-      return data.employees.filter((e) => e.departmentId === deptId && e.status !== 'leave').length;
+      return _zs.scopedEmployees.value.filter((e) => e.departmentId === deptId && e.status !== 'leave').length;
     }
 
     function fulfillmentRate(deptId) {
@@ -774,17 +828,17 @@
     }
 
     function deptName(id) {
-      return data.departments.find((d) => d.id === id)?.name || '-';
+      return data._deptMap.get(id)?.name || '-';
     }
     function parentDeptName(pid) {
       if (pid == null) return '—';
       return deptName(pid);
     }
     function empName(eid) {
-      return data.employees.find((e) => e.id === eid)?.name || '—';
+      return data._empMap.get(eid)?.name || '—';
     }
     function posName(id) {
-      return data.positions.find((p) => p.id === id)?.name || '-';
+      return data._posMap.get(id)?.name || '-';
     }
     function statusLabel(s) {
       return { active: 'Active', probation: 'Probation', leave: 'Leaving' }[s] || s;
@@ -793,7 +847,7 @@
     function drawDeptCountBar() {
       if (!deptCountBarRef.value || !echartsLib) return;
       const deptCount = {};
-      data.employees.filter((e) => e.status !== 'leave').forEach((e) => {
+      _zs.scopedEmployees.value.filter((e) => e.status !== 'leave').forEach((e) => {
         const d = data.departments.find((x) => x.id === e.departmentId);
         const name = d?.name || 'Unassigned';
         deptCount[name] = (deptCount[name] || 0) + 1;
@@ -1000,29 +1054,33 @@
     onMounted(async () => {
       echartsLib = await loadEcharts();
       renderChart();
+      let _orgResizeTimer = null;
       window.addEventListener('resize', () => {
-        chartInst?.resize();
-        deptBarInst?.resize();
+        if (_orgResizeTimer) clearTimeout(_orgResizeTimer);
+        _orgResizeTimer = setTimeout(() => { _orgResizeTimer = null; chartInst?.resize(); deptBarInst?.resize(); }, 200);
       });
     });
 
+    let _orgRenderTimer = null;
+    function scheduleRenderChart() {
+      if (_orgRenderTimer) clearTimeout(_orgRenderTimer);
+      _orgRenderTimer = setTimeout(() => { _orgRenderTimer = null; if (chartInst) renderChart(); }, 300);
+    }
     watch(
       () => [
         data.departments.length,
         data.employees.length,
         data.positions.length,
-        data.departments.map((d) => `${d.id}:${d.parentId ?? ''}`).join('|'),
-        data.employees.map((e) => `${e.id}:${e.status}:${e.departmentId}:${e.positionId ?? ''}`).join('|'),
-        data.positions.map((p) => `${p.id}:${p.departmentId}:${p.name}:${p.level}`).join('|'),
-        JSON.stringify(data.positionRecruitTags || {}),
-        JSON.stringify(data.orgChangeRequests || []),
+        (data.orgChangeRequests || []).length,
+        Object.keys(data.positionRecruitTags || {}).length,
       ],
-      () => { if (chartInst) renderChart(); },
+      () => { scheduleRenderChart(); },
     );
-
-    
+    const _orgUnsub = data.$subscribe(() => { scheduleRenderChart(); });
 
     onUnmounted(() => {
+      if (typeof _orgUnsub === 'function') _orgUnsub();
+      if (_orgRenderTimer) clearTimeout(_orgRenderTimer);
       chartInst?.dispose();
       deptBarInst?.dispose();
     });
@@ -1265,7 +1323,7 @@
     }
 
     return {
-      data, auth, orgOwnerId, orgRequestsSorted, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq,
+      data, auth, _zs, orgOwnerId, orgRequestsSorted, orgActiveRequests, orgHistoryRequests, showOrgHistory, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq,
       chartRef, deptCountBarRef, deptModal, deptMode, deptForm,
       posModal, posMode, posForm, posMarkRecruitAfterCreate, posCreateRecruitReq, posQuantity, posHcExceedMsg, jobTradesList, jobLevelsList,
       deptManagerOptions, fulfillmentRate, onHcPlanChange,

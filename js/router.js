@@ -20,6 +20,7 @@
         { path: 'performance', name: 'hrbp-performance', component: TM.HrbpPerformance, meta: { title: 'Performance' } },
         { path: 'talent', name: 'hrbp-talent', component: TM.HrbpTalent, meta: { title: 'Talent review' } },
         { path: 'recruitment', name: 'hrbp-recruitment', component: TM.HrbpRecruitment, meta: { title: 'Recruiting' } },
+        { path: 'users', name: 'hrbp-users', component: TM.HrbpUserManagement, meta: { title: 'User management', requireSuperAdmin: true } },
         { path: 'analytics', name: 'hrbp-analytics', redirect: '/hrbp/dashboard' },
       ],
     },
@@ -29,13 +30,13 @@
       meta: { zone: 'manager' },
       children: [
         { path: '', redirect: '/manager/dashboard' },
-        { path: 'dashboard', name: 'mgr-dashboard', component: TM.MgrDashboard, meta: { title: 'Dashboard' } },
-        { path: 'team', name: 'mgr-team', component: TM.MgrTeam, meta: { title: 'My team' } },
-        { path: 'performance', name: 'mgr-performance', component: TM.MgrPerformance, meta: { title: 'Performance reviews' } },
-        { path: 'leaves', name: 'mgr-leaves', component: TM.MgrLeaves, meta: { title: 'Leave approvals' } },
-        { path: 'training', name: 'mgr-training', component: TM.MgrTraining, meta: { title: 'Training' } },
-        { path: 'analytics', name: 'mgr-analytics', component: TM.MgrAnalytics, meta: { title: 'Team analytics' } },
-        { path: 'org-approvals', name: 'mgr-org-approvals', component: TM.MgrOrgApprovals, meta: { title: 'Org approvals' } },
+        { path: 'dashboard', name: 'mgr-dashboard', component: TM.HrbpDashboard, meta: { title: 'Dashboard' } },
+        { path: 'roster', name: 'mgr-roster', component: TM.HrbpRoster, meta: { title: '花名册' } },
+        { path: 'org', name: 'mgr-org', component: TM.HrbpOrg, meta: { title: '组织管理' } },
+        { path: 'recruitment', name: 'mgr-recruitment', component: TM.HrbpRecruitment, meta: { title: '招聘管理' } },
+        { path: 'talent', name: 'mgr-talent', component: TM.HrbpTalent, meta: { title: '人才盘点' } },
+        { path: 'performance', name: 'mgr-performance', component: TM.MgrPerformance, meta: { title: 'Performance' } },
+        { path: 'attendance', name: 'mgr-attendance', component: TM.HrbpAttendance, meta: { title: '考勤' } },
       ],
     },
     {
@@ -55,7 +56,13 @@
     const auth = TM.useAuthStore();
     if (to.meta.public) {
       if (auth.isLoggedIn && to.name === 'login') {
-        next(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
+        if (auth.isHrbp) {
+          const HRBP_MODS = window.TM.HRBP_MODULES || [];
+          const firstMod = HRBP_MODS.find((m) => auth.canAccessModule(m)) || 'recruitment';
+          next('/hrbp/' + firstMod);
+        } else {
+          next('/manager/dashboard');
+        }
       } else next();
       return;
     }
@@ -63,7 +70,7 @@
       next({ path: '/login', query: { redirect: to.fullPath } });
       return;
     }
-    const canHrbp = auth.isHrbp || auth.isSuperAdmin;
+    const canHrbp = auth.isHrbp || auth.isSuperAdmin || auth.isProductLineOwner;
     if (to.path.startsWith('/hrbp') && !canHrbp) {
       next('/manager/dashboard');
       return;
@@ -71,6 +78,30 @@
     if (to.path.startsWith('/manager') && !auth.isManager) {
       next('/hrbp/dashboard');
       return;
+    }
+    if (to.meta.requireSuperAdmin && !auth.canManageUsers) {
+      next(auth.isHrbp ? '/hrbp/recruitment' : '/manager/dashboard');
+      return;
+    }
+    if (to.path.startsWith('/hrbp/') && auth.isHrbp) {
+      const seg = to.path.split('/')[2];
+      if (seg && seg !== 'users') {
+        if (!auth.canAccessModule(seg)) {
+          const HRBP_MODS = window.TM.HRBP_MODULES || [];
+          const fallback = HRBP_MODS.find((m) => auth.canAccessModule(m));
+          next(fallback ? '/hrbp/' + fallback : '/hrbp/recruitment');
+          return;
+        }
+      }
+    }
+    if (to.path.startsWith('/manager/') && auth.isManager) {
+      const seg = to.path.split('/')[2];
+      if (seg && !auth.canAccessModule(seg)) {
+        const MGR_MODS = window.TM.MGR_MODULES || [];
+        const fallback = MGR_MODS.find((m) => auth.canAccessModule(m)) || 'dashboard';
+        next('/manager/' + fallback);
+        return;
+      }
     }
     next();
   });

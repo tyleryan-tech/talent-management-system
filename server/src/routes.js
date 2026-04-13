@@ -1,8 +1,10 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const {
   authenticateLogin,
   authMiddleware,
   requireHrbp,
+  requireSuperAdmin,
 } = require('./auth');
 const {
   getWorkspace,
@@ -13,6 +15,22 @@ const {
 } = require('./db');
 const { shapeWorkspaceForReader, hasFullWorkspaceAccess } = require('./workspaceScope');
 const { validateAndApplyPatch } = require('./workspacePatch');
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '登录请求过于频繁，请 1 分钟后重试', code: 'RATE_LIMIT' },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '请求过于频繁，请稍后重试', code: 'RATE_LIMIT' },
+});
 
 function requireFullWorkspaceWriter(req, res, next) {
   if (hasFullWorkspaceAccess(req.authUser)) {
@@ -27,22 +45,35 @@ function requireFullWorkspaceWriter(req, res, next) {
 
 function createRouter(db, broadcastLine) {
   const r = express.Router();
+  r.use(apiLimiter);
 
   /** 与根路径 /health 一致，便于仅反代 /api/* 的网关做存活检查 */
   r.get('/health', (req, res) => {
     res.json({ ok: true, service: 'talent-hub-server' });
   });
 
-  r.post('/auth/login', (req, res) => {
-    const body = req.body || {};
-    const { identifier, password, email, username } = body;
-    const id = identifier != null ? identifier : (email != null ? email : username);
-    const result = authenticateLogin(db, id, password);
-    if (!result.ok) {
-      res.status(401).json({ error: result.message, code: 'LOGIN_FAILED' });
-      return;
+  r.post('/auth/login', loginLimiter, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const { identifier, password, email, username } = body;
+      const id = identifier != null ? identifier : (email != null ? email : username);
+      const result = await authenticateLogin(db, id, password);
+      if (!result.ok) {
+        res.status(401).json({ error: result.message, code: 'LOGIN_FAILED' });
+        return;
+      }
+      const isSecure = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
+      res.cookie('tm_token', result.token, {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: isSecure ? 'None' : 'Lax',
+        maxAge: 2 * 60 * 60 * 1000,
+        path: '/api',
+      });
+      res.json({ token: result.token, user: result.user });
+    } catch (e) {
+      res.status(500).json({ error: '服务器内部错误', code: 'INTERNAL_ERROR' });
     }
-    res.json({ token: result.token, user: result.user });
   });
 
   r.get('/auth/me', authMiddleware(db), (req, res) => {
@@ -104,7 +135,7 @@ function createRouter(db, broadcastLine) {
     });
   });
 
-  r.post('/workspace/:lineId/patch', authMiddleware(db), express.json({ limit: '20mb' }), (req, res) => {
+  r.post('/workspace/:lineId/patch', authMiddleware(db), express.json({ limit: '5mb' }), (req, res) => {
     const lineId = Number(req.params.lineId);
     if (Number.isNaN(lineId)) {
       res.status(400).json({ error: '无效的产品线 ID' });
@@ -159,7 +190,7 @@ function createRouter(db, broadcastLine) {
     res.json({ ok: true, version: result.version });
   });
 
-  r.put('/workspace/:lineId', authMiddleware(db), requireFullWorkspaceWriter, express.json({ limit: '50mb' }), (req, res) => {
+  r.put('/workspace/:lineId', authMiddleware(db), requireFullWorkspaceWriter, express.json({ limit: '10mb' }), (req, res) => {
     const lineId = Number(req.params.lineId);
     if (Number.isNaN(lineId)) {
       res.status(400).json({ error: '无效的产品线 ID' });
@@ -170,6 +201,12 @@ function createRouter(db, broadcastLine) {
     if (clientVersion == null || data == null || typeof data !== 'object') {
       res.status(400).json({ error: '需要 clientVersion 与 data' });
       return;
+    }
+    if (Array.isArray(data.users)) {
+      data.users = data.users.map((u) => {
+        const { password, ...rest } = u;
+        return rest;
+      });
     }
     let jsonStr;
     try {

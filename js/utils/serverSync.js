@@ -71,11 +71,27 @@
         if (api && String(api).trim()) {
           let u = String(api).trim().replace(/\/$/, '');
           if (!/^https?:\/\//i.test(u)) u = `http://${u}`;
-          w.localStorage.setItem(API_BASE_KEY, u);
-          apiBase = u;
-          apiBaseSource = 'url';
-          applyWsMeta();
-          return;
+          const envMeta = w.document.querySelector('meta[name="tm-env"]');
+          const env = envMeta?.getAttribute('content') || 'production';
+          if (env !== 'development') {
+            console.warn('[serverSync] ?api= 参数仅允许在 development 环境下使用，已忽略');
+          } else {
+            try {
+              const parsed = new URL(u);
+              const allowed = ['localhost', '127.0.0.1', '0.0.0.0'];
+              if (!allowed.includes(parsed.hostname) && parsed.hostname !== w.location.hostname) {
+                console.warn('[serverSync] ?api= 仅允许 localhost 或同域地址，已拒绝:', parsed.hostname);
+              } else {
+                w.localStorage.setItem(API_BASE_KEY, u);
+                apiBase = u;
+                apiBaseSource = 'url';
+                applyWsMeta();
+                return;
+              }
+            } catch {
+              console.warn('[serverSync] ?api= 地址格式无效');
+            }
+          }
         }
       } catch {
         /* ignore */
@@ -223,7 +239,7 @@
         return;
       }
       serverSync.disconnectWs();
-      const url = `${serverSync.wsUrl()}?token=${encodeURIComponent(serverSync.getToken())}`;
+      const url = serverSync.wsUrl();
       try {
         ws = new WebSocket(url);
       } catch {
@@ -231,6 +247,7 @@
       }
       wsLineSubscribed = lid;
       ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'auth', token: serverSync.getToken() }));
         ws.send(JSON.stringify({ type: 'subscribe', lineId: lid }));
       };
       ws.onmessage = (ev) => {
@@ -269,7 +286,7 @@
     },
 
     scheduleWorkspacePush() {
-      if (!serverSync.isEnabled()) return;
+      if (!serverSync.isEnabled() || !serverSync.getToken()) return;
       clearTimeout(pushTimer);
       pushTimer = setTimeout(() => {
         pushTimer = null;
@@ -289,7 +306,7 @@
     },
 
     async pushWorkspaceNow() {
-      if (!serverSync.isEnabled() || serverSync.isApplyingRemote) return;
+      if (!serverSync.isEnabled() || !serverSync.getToken() || serverSync.isApplyingRemote) return;
       const pl = w.TM.useProductLineStore?.();
       const data = w.TM.useDataStore?.();
       const hr = w.TM.useHrScopeStore?.();
@@ -358,7 +375,7 @@
     },
 
     scheduleRefreshFromServer(immediate) {
-      if (!serverSync.isEnabled()) return;
+      if (!serverSync.isEnabled() || !serverSync.getToken()) return;
       clearTimeout(refreshTimer);
       const run = () => {
         refreshTimer = null;
@@ -370,7 +387,7 @@
 
     /** HRBP 修改顶部「组织范围」后重新拉取与服务端一致的子集 */
     schedulePullAfterScopeChange() {
-      if (!serverSync.isEnabled()) return;
+      if (!serverSync.isEnabled() || !serverSync.getToken()) return;
       clearTimeout(scopePullTimer);
       scopePullTimer = setTimeout(() => {
         scopePullTimer = null;

@@ -92,4 +92,81 @@
       positionDeptInScope,
     };
   };
+  /**
+   * Collect all employee IDs in the management subtree (excluding rootId itself).
+   */
+  w.TM.collectSubtreeIds = function collectSubtreeIds(employees, rootManagerId) {
+    const rid = Number(rootManagerId);
+    if (!rid || Number.isNaN(rid)) return new Set();
+    const ids = new Set();
+    const q = [rid];
+    while (q.length) {
+      const mid = q.shift();
+      (employees || []).forEach(function (e) {
+        const eid = Number(e.id);
+        if (Number(e.managerId) === mid && !ids.has(eid)) {
+          ids.add(eid);
+          q.push(eid);
+        }
+      });
+    }
+    return ids;
+  };
+
+  /**
+   * Composable: zone-aware data scoping.
+   * In manager zone → auto-restrict to reporting subtree.
+   * In HRBP zone → returns everything (no restriction).
+   */
+  w.TM.useZoneScope = function useZoneScope(dataStore) {
+    var _Vue = w.Vue, computed = _Vue.computed;
+    var route = VueRouter.useRoute();
+    var auth = w.TM.useAuthStore();
+
+    var isManagerZone = computed(function () { return route.path.startsWith('/manager'); });
+
+    var teamEmpIds = computed(function () {
+      if (!isManagerZone.value) return null;
+      var myId = auth.currentUser ? auth.currentUser.employeeId : null;
+      if (!myId) return new Set();
+      return w.TM.collectSubtreeIds(dataStore.employees, myId);
+    });
+
+    var scopedEmployees = computed(function () {
+      var set = teamEmpIds.value;
+      if (!set) return dataStore.employees;
+      return dataStore.employees.filter(function (e) { return set.has(Number(e.id)); });
+    });
+
+    function employeeInTeam(emp) {
+      var set = teamEmpIds.value;
+      if (!set) return true;
+      return set.has(Number(emp.id));
+    }
+
+    var teamDeptIds = computed(function () {
+      var set = teamEmpIds.value;
+      if (!set) return null;
+      var ids = new Set();
+      dataStore.employees.forEach(function (e) {
+        if (set.has(Number(e.id))) ids.add(Number(e.departmentId));
+      });
+      return ids;
+    });
+
+    var scopedDepartments = computed(function () {
+      var d = teamDeptIds.value;
+      if (!d) return dataStore.departments;
+      return dataStore.departments.filter(function (dept) { return d.has(Number(dept.id)); });
+    });
+
+    return {
+      isManagerZone: isManagerZone,
+      teamEmpIds: teamEmpIds,
+      scopedEmployees: scopedEmployees,
+      employeeInTeam: employeeInTeam,
+      teamDeptIds: teamDeptIds,
+      scopedDepartments: scopedDepartments,
+    };
+  };
 })(window);

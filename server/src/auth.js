@@ -7,11 +7,10 @@ const {
 
 function getJwtSecret() {
   const s = process.env.JWT_SECRET;
-  if (!s || s === 'change-me-to-a-long-random-string') {
-    // eslint-disable-next-line no-console
-    console.warn('[auth] Using default JWT_SECRET; set JWT_SECRET in production.');
+  if (!s) {
+    throw new Error('[auth] JWT_SECRET 未设置，拒绝处理请求。');
   }
-  return s || 'dev-only-insecure-secret';
+  return s;
 }
 
 function toPublicUser(row) {
@@ -28,12 +27,12 @@ function toPublicUser(row) {
   };
 }
 
-function verifyPassword(row, password) {
+async function verifyPassword(row, password) {
   if (!row || !password) return false;
-  return bcrypt.compareSync(String(password), row.password_hash);
+  return bcrypt.compare(String(password), row.password_hash);
 }
 
-function authenticateLogin(db, identifier, password) {
+async function authenticateLogin(db, identifier, password) {
   const id = String(identifier || '').trim();
   if (!id) return { ok: false, message: '请输入邮箱或用户名' };
   const idLower = id.toLowerCase();
@@ -41,7 +40,7 @@ function authenticateLogin(db, identifier, password) {
   if (!row && !idLower.includes('@')) {
     row = findLoginUserByUsername(db, idLower);
   }
-  if (!row || !verifyPassword(row, password)) {
+  if (!row || !(await verifyPassword(row, password))) {
     return { ok: false, message: '邮箱/用户名或密码错误' };
   }
   const user = toPublicUser(row);
@@ -53,21 +52,27 @@ function authenticateLogin(db, identifier, password) {
       sa: user.superAdmin === true,
     },
     getJwtSecret(),
-    { expiresIn: '7d' },
+    { algorithm: 'HS256', expiresIn: '2h' },
   );
   return { ok: true, token, user };
 }
 
+function extractToken(req) {
+  const h = req.headers.authorization || '';
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  if (m) return m[1];
+  return req.cookies?.tm_token || null;
+}
+
 function authMiddleware(db) {
   return (req, res, next) => {
-    const h = req.headers.authorization || '';
-    const m = h.match(/^Bearer\s+(.+)$/i);
-    if (!m) {
+    const token = extractToken(req);
+    if (!token) {
       res.status(401).json({ error: '未登录', code: 'UNAUTHORIZED' });
       return;
     }
     try {
-      const payload = jwt.verify(m[1], getJwtSecret());
+      const payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
       const row = db.prepare('SELECT * FROM login_users WHERE id = ?').get(payload.sub);
       if (!row) {
         res.status(401).json({ error: '登录已失效', code: 'UNAUTHORIZED' });
@@ -83,15 +88,14 @@ function authMiddleware(db) {
 
 function optionalAuthMiddleware(db) {
   return (req, res, next) => {
-    const h = req.headers.authorization || '';
-    const m = h.match(/^Bearer\s+(.+)$/i);
-    if (!m) {
+    const token = extractToken(req);
+    if (!token) {
       req.authUser = null;
       next();
       return;
     }
     try {
-      const payload = jwt.verify(m[1], getJwtSecret());
+      const payload = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] });
       const row = db.prepare('SELECT * FROM login_users WHERE id = ?').get(payload.sub);
       req.authUser = row ? toPublicUser(row) : null;
     } catch {

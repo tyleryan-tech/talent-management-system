@@ -312,13 +312,18 @@
       const data = useDataStore();
       const hrScope = useHrScopeStore();
       const chartPrefs = window.TM.chartPrefs;
+      const orgScope = createOrgScopeBindings(data, hrScope);
       const {
         scopeDeptIds,
         scopeRootDeptUi,
         deptScopeOptions,
         scopeHint,
-        employeeInScope,
-      } = createOrgScopeBindings(data, hrScope);
+      } = orgScope;
+      const zs = window.TM.useZoneScope(data);
+      function employeeInScope(emp) {
+        if (!zs.employeeInTeam(emp)) return false;
+        return orgScope.employeeInScope(emp);
+      }
       const cTenure = ref(null);
       const cHireYear = ref(null);
       const cTrend = ref(null);
@@ -366,12 +371,12 @@
       let unsubStore;
 
       const devTest = computed(() => {
+        const posMap = data._posMap;
         const emps = data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e));
         let dev = 0;
         let test = 0;
         emps.forEach((e) => {
-          const p = data.positions.find((x) => x.id === e.positionId);
-          const nm = p?.name || '';
+          const nm = posMap.get(e.positionId)?.name || '';
           if (isTestRoleName(nm)) test += 1;
           else if (isDevRoleName(nm)) dev += 1;
         });
@@ -386,24 +391,24 @@
         return data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e));
       }
 
-      /** 组织范围内在职员工，并可按顶部职级筛选（与各新增统计一致） */
       function scopedEmps() {
         let list = activeEmps();
         const lv = analyticsRankFilter.value;
         if (lv) {
+          const posMap = data._posMap;
           list = list.filter((e) => {
-            const p = data.positions.find((x) => x.id === e.positionId);
+            const p = posMap.get(e.positionId);
             return p && String(p.level).trim() === lv;
           });
         }
         return list;
       }
 
-      /** Ranks present among active employees in scope (aligned with chart populations) */
       const levelOptions = computed(() => {
+        const posMap = data._posMap;
         const set = new Set();
         activeEmps().forEach((e) => {
-          const p = data.positions.find((x) => x.id === e.positionId);
+          const p = posMap.get(e.positionId);
           if (p && p.level != null && String(p.level).trim() !== '') set.add(String(p.level).trim());
         });
         return Array.from(set).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
@@ -421,19 +426,19 @@
       }
 
       function deptLabel(id) {
-        return data.departments.find((d) => d.id === id)?.name || '—';
+        return data._deptMap.get(id)?.name || '—';
       }
       function posLabel(id) {
-        return data.positions.find((p) => p.id === id)?.name || '—';
+        return data._posMap.get(id)?.name || '—';
       }
       function levelLabel(pid) {
-        return data.positions.find((p) => p.id === pid)?.level || '—';
+        return data._posMap.get(pid)?.level || '—';
       }
 
       /** 员工最近一次已定档绩效等级（按周期优先） */
       function lastFinalizedGrade(employeeId) {
-        const mine = data.performanceReviews.filter((r) => Number(r.employeeId) === Number(employeeId)
-          && r.status === 'finalized' && String(r.finalGrade || '').trim());
+        const mine = (data._reviewsByEmp.get(Number(employeeId)) || []).filter((r) =>
+          r.status === 'finalized' && String(r.finalGrade || '').trim());
         if (!mine.length) return null;
         mine.sort((a, b) => {
           const c = (Number(b.cycleId) || 0) - (Number(a.cycleId) || 0);
@@ -565,9 +570,9 @@
         const counts = {};
         trades.forEach((t) => { counts[t] = 0; });
         let other = 0;
+        const posMap = data._posMap;
         scopedEmps().forEach((e) => {
-          const p = data.positions.find((x) => x.id === e.positionId);
-          const nm = String(p?.name || '').trim();
+          const nm = String(posMap.get(e.positionId)?.name || '').trim();
           if (Object.prototype.hasOwnProperty.call(counts, nm)) counts[nm] += 1;
           else other += 1;
         });
@@ -598,9 +603,9 @@
         const counts = {};
         levels.forEach((lv) => { counts[lv] = 0; });
         let other = 0;
+        const posMap = data._posMap;
         list.forEach((e) => {
-          const p = data.positions.find((x) => x.id === e.positionId);
-          const lv = String(p?.level || '').trim();
+          const lv = String(posMap.get(e.positionId)?.level || '').trim();
           if (Object.prototype.hasOwnProperty.call(counts, lv)) counts[lv] += 1;
           else other += 1;
         });
@@ -806,44 +811,62 @@
         drawAvgTenureDim();
       }
 
+      function safeInit(domRef) {
+        return domRef ? echartsLib.init(domRef) : null;
+      }
+
+      let _resizeHandler = null;
+
       onMounted(async () => {
         echartsLib = await loadEcharts();
-        chTenure = echartsLib.init(cTenure.value);
-        chHireYear = echartsLib.init(cHireYear.value);
-        chTrend = echartsLib.init(cTrend.value);
-        chDevTest = echartsLib.init(cDevTest.value);
-        chTradeHc = echartsLib.init(cTradeHc.value);
-        chLevelHc = echartsLib.init(cLevelHc.value);
-        chAvgTenureDim = echartsLib.init(cAvgTenureDim.value);
-        charts.push(chTenure, chHireYear, chTrend, chDevTest, chTradeHc, chLevelHc, chAvgTenureDim);
+        chTenure = safeInit(cTenure.value);
+        chHireYear = safeInit(cHireYear.value);
+        chTrend = safeInit(cTrend.value);
+        chDevTest = safeInit(cDevTest.value);
+        chTradeHc = safeInit(cTradeHc.value);
+        chLevelHc = safeInit(cLevelHc.value);
+        chAvgTenureDim = safeInit(cAvgTenureDim.value);
+        [chTenure, chHireYear, chTrend, chDevTest, chTradeHc, chLevelHc, chAvgTenureDim]
+          .forEach((c) => { if (c) charts.push(c); });
 
         bindTenureClick();
         drawTrend();
         redrawAll();
 
-        watch(analyticsRankFilter, () => { redrawAll(); });
+        let _redrawTimer = null;
+        function debouncedRedraw() {
+          if (_redrawTimer) clearTimeout(_redrawTimer);
+          _redrawTimer = setTimeout(() => { _redrawTimer = null; redrawAll(); }, 200);
+        }
+
+        watch(analyticsRankFilter, () => { debouncedRedraw(); });
         watch(avgTenureDimension, () => { drawAvgTenureDim(); });
-        watch(() => productLine.lines, () => { redrawAll(); }, { deep: true });
+        watch(() => productLine.lines?.length, () => { debouncedRedraw(); });
         watch(levelOptions, (opts) => {
           if (analyticsRankFilter.value && !opts.includes(analyticsRankFilter.value)) {
             analyticsRankFilter.value = '';
           }
         });
 
-        unsubStore = data.$subscribe(() => { redrawAll(); });
+        unsubStore = data.$subscribe(() => { debouncedRedraw(); });
 
-        watch(() => hrScope.scopeRootDepartmentId, () => { redrawAll(); });
+        watch(() => hrScope.scopeRootDepartmentId, () => { debouncedRedraw(); });
 
-        // Re-render when chart visibility changes (v-if re-creates the DOM node)
         watch(() => chartPrefs.hidden.slice(), () => {
-          Vue.nextTick(() => { redrawAll(); });
+          Vue.nextTick(() => { debouncedRedraw(); });
         });
 
-        window.addEventListener('resize', () => charts.forEach((c) => c.resize()));
+        let _resizeTimer = null;
+        _resizeHandler = () => {
+          if (_resizeTimer) clearTimeout(_resizeTimer);
+          _resizeTimer = setTimeout(() => { _resizeTimer = null; charts.forEach((c) => c.resize()); }, 200);
+        };
+        window.addEventListener('resize', _resizeHandler);
       });
 
       onUnmounted(() => {
         if (typeof unsubStore === 'function') unsubStore();
+        if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
         charts.forEach((c) => c.dispose());
       });
 
