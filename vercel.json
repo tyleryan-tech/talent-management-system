@@ -1,7 +1,7 @@
 {
   "version": 2,
+  "framework": null,
   "buildCommand": "",
-  "outputDirectory": ".",
   "functions": {
     "api/[...slug].js": {
       "maxDuration": 10,

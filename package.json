@@ -6,7 +6,7 @@
   },
   "scripts": {
     "dev": "vite --config vite.config.ts",
-    "build": "vue-tsc --noEmit && vite build",
+    "build:vite": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test:browser": "echo 'Open tests/index.html in browser'"
   },
