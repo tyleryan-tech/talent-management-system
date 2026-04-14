@@ -165,8 +165,9 @@
           } catch (e) {
             const code = e.body?.code || '';
             const status = e.status || 0;
-            const isServerDown = status === 0 || status === 502 || status === 503 || status === 504
-              || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE';
+            const isServerDown = status === 0 || status === 500 || status === 502 || status === 503 || status === 504
+              || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE'
+              || code === 'FUNCTION_INVOCATION_FAILED';
             const is404Html = status === 404 && /NOT_FOUND/i.test(String(e.body?.raw || ''));
             if (isServerDown || is404Html) {
               if (this._isProduction()) {
