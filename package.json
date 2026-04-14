@@ -2,7 +2,7 @@
   "name": "talent-management-system",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "vite --config vite.config.ts",
