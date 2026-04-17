@@ -17,6 +17,7 @@
         { path: 'roster', name: 'hrbp-roster', component: TM.HrbpRoster, meta: { title: 'Employee roster' } },
         { path: 'org', name: 'hrbp-org', component: TM.HrbpOrg, meta: { title: 'Organization' } },
         { path: 'attendance', name: 'hrbp-attendance', component: TM.HrbpAttendance, meta: { title: 'Attendance' } },
+        { path: 'ai-analyst', name: 'hrbp-ai-analyst', component: TM.HrbpAiAnalyst, meta: { title: 'AI 数据分析' } },
         { path: 'performance', name: 'hrbp-performance', component: TM.HrbpPerformance, meta: { title: 'Performance' } },
         { path: 'talent', name: 'hrbp-talent', component: TM.HrbpTalent, meta: { title: 'Talent review' } },
         { path: 'recruitment', name: 'hrbp-recruitment', component: TM.HrbpRecruitment, meta: { title: 'Recruiting' } },
@@ -37,6 +38,7 @@
         { path: 'talent', name: 'mgr-talent', component: TM.HrbpTalent, meta: { title: '人才盘点' } },
         { path: 'performance', name: 'mgr-performance', component: TM.MgrPerformance, meta: { title: 'Performance' } },
         { path: 'attendance', name: 'mgr-attendance', component: TM.HrbpAttendance, meta: { title: '考勤' } },
+        { path: 'ai-analyst', name: 'mgr-ai-analyst', component: TM.HrbpAiAnalyst, meta: { title: 'AI 数据分析' } },
       ],
     },
     {
