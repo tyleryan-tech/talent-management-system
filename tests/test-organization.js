@@ -32,9 +32,9 @@
       assert.ok(!data.departments.find((d) => d.id === dept.id), 'Should be removed');
     });
 
-    it('should add a position', function () {
+    it('should add a position', function (assert, skip) {
       const dept = data.departments[0];
-      if (!dept) return;
+      if (!dept) skip('no departments exist');
       const before = data.positions.length;
       data.addPosition({ name: 'Frontend', level: 'SE', departmentId: dept.id, quantity: 1 });
       assert.equal(data.positions.length, before + 1);

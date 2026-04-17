@@ -53,7 +53,7 @@
     const auth = useAuthStore();
     const data = useDataStore();
     const me = computed(() => auth.currentUser?.employeeId);
-    const subs = computed(() => data.employees.filter((e) => e.managerId === me.value));
+    const subs = computed(() => data.employees.filter((e) => e.managerId === me.value && e.status !== 'leave'));
     const pickEmp = ref(subs.value[0]?.id ?? null);
     const pickCourse = ref(data.trainings[0]?.id ?? null);
 

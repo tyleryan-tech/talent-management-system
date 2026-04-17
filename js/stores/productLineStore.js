@@ -15,38 +15,6 @@
       performanceReviews: [],
       trainings: [],
       employeeTrainings: [],
-      users: [
-        {
-          id: 1,
-          username: 'hrbp',
-          email: 'hrbp@company.com',
-          password: '123',
-          role: 'hrbp',
-          superAdmin: true,
-          hrbpSubType: 'super_admin',
-          realName: 'HRBP Super Admin',
-          employeeId: null,
-        },
-        {
-          id: 2,
-          username: 'manager',
-          email: 'manager@company.com',
-          password: '123',
-          role: 'manager',
-          realName: 'Reporting Manager',
-          employeeId: null,
-        },
-        {
-          id: 3,
-          username: 'superadmin',
-          email: 'superadmin@company.com',
-          password: '123',
-          role: 'hrbp',
-          superAdmin: true,
-          realName: 'Super Admin',
-          employeeId: null,
-        },
-      ],
       attendanceRules: {
         workStart: '09:30',
         workEnd: '18:30',
@@ -79,6 +47,20 @@
     }),
     getters: {
       currentLine: (s) => s.lines.find((l) => l.id === s.currentLineId) || null,
+      accessibleLines() {
+        const auth = TM.useAuthStore?.();
+        if (!auth?.isLoggedIn) return this.lines;
+        const cu = auth.currentUser;
+        if (!cu) return this.lines;
+        if (cu.superAdmin || cu.hrbpSubType === 'super_admin') return this.lines;
+        if (Array.isArray(cu.allowedLineIds) && cu.allowedLineIds.length) {
+          return this.lines.filter((l) => cu.allowedLineIds.includes(l.id));
+        }
+        return this.lines.filter((l) => l.id === this.currentLineId);
+      },
+      canSwitchLine() {
+        return this.accessibleLines.length > 1;
+      },
     },
     actions: {
       hydrate() {
@@ -101,13 +83,13 @@
       },
       async createLine(name) {
         const auth = TM.useAuthStore();
-        if (!auth.isHrbp) return false;
+        if (!(auth.currentUser?.superAdmin || auth.currentUser?.hrbpSubType === 'super_admin')) return false;
         const data = TM.useDataStore();
         const ss = TM.serverSync;
         const nm = String(name || '').trim() || 'New product line';
         const today = new Date().toISOString().slice(0, 10);
         if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
-        data.persistAll({ skipRemote: true });
+        data.flushBeforeLineSwitch();
         let id;
         if (ss && ss.isEnabled && ss.isEnabled()) {
           try {
@@ -162,11 +144,16 @@
         const id = Number(lineId);
         if (Number.isNaN(id) || !this.lines.some((l) => l.id === id)) return false;
         if (id === this.currentLineId) return true;
+        if (!this.accessibleLines.some((l) => l.id === id)) {
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: { message: '当前账号无权访问此产品线', type: 'error' },
+          }));
+          return false;
+        }
         const data = TM.useDataStore();
         const ss = TM.serverSync;
-        // 取消所有挂起的推送：切换前先落盘但不推送；推送时序混乱会导致"同步失败"弹窗
         if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
-        data.persistAll({ skipRemote: true });
+        data.flushBeforeLineSwitch();
         this.currentLineId = id;
         this.persistRegistry();
         const hr = TM.useHrScopeStore();
@@ -205,7 +192,7 @@
        */
       async removeLine(lineId) {
         const auth = TM.useAuthStore();
-        if (!auth.isHrbp) return false;
+        if (!(auth.currentUser?.superAdmin || auth.currentUser?.hrbpSubType === 'super_admin')) return false;
         if (this.lines.length <= 1) {
           window.dispatchEvent(new CustomEvent('tm-toast', {
             detail: { message: '至少需要保留一条产品线。', type: 'error' },
@@ -217,7 +204,7 @@
         const data = TM.useDataStore();
         const ss = TM.serverSync;
         if (ss && typeof ss.cancelPendingPush === 'function') ss.cancelPendingPush();
-        data.persistAll({ skipRemote: true });
+        data.flushBeforeLineSwitch();
         const removedName = this.lines.find((l) => l.id === id)?.name || String(id);
         if (ss && ss.isEnabled && ss.isEnabled()) {
           try {
@@ -268,18 +255,14 @@
         const u = data.users.find((x) => x.id === cu.id
           || x.username === cu.username
           || (cu.email && String(x.email || '').toLowerCase() === String(cu.email).toLowerCase()));
-        if (!u) {
-          auth.logout();
+        if (u) {
+          auth.currentUser = { ...u };
           auth.persistSession();
-          if (TM.router) TM.router.push('/login');
-          window.dispatchEvent(new CustomEvent('tm-toast', {
-            detail: { message: 'This account is not in the current product line. Please sign in again.', type: 'error' },
-          }));
+          auth.enrichCurrentUserFromEmployee();
           return;
         }
-        auth.currentUser = { ...u };
+        auth.currentUser = { ...cu, orgRole: '' };
         auth.persistSession();
-        auth.enrichCurrentUserFromEmployee();
       },
     },
   });

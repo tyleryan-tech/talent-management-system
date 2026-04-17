@@ -6,13 +6,15 @@
   TM.PERF_CYCLE_TYPE_LABEL = { half_year: '半年绩效', year: '年度绩效' };
   TM.PERF_CYCLE_TYPE_LABEL_EN = { half_year: 'Half-year', year: 'Annual' };
 
-  TM.PERF_VALID_STATUSES = ['rm_pending', 'in_approval', 'pl_approved', 'calibrated', 'finalized', 'rejected'];
+  TM.PERF_VALID_STATUSES = ['rm_pending', 'rm_evaluated', 'in_approval', 'pl_pending', 'calibrated', 'pl_approved', 'finalized', 'rejected'];
 
   TM.PERF_STATUS_LABEL = {
     rm_pending: '待 RM 评估',
+    rm_evaluated: '已评估（待提交）',
     in_approval: '逐级审批中',
-    pl_approved: '待 HRBP 校准',
-    calibrated: '已校准（待归档）',
+    pl_pending: '待 HRBP 校准',
+    calibrated: '已校准（待产品线审批）',
+    pl_approved: '产品线已审批（待归档）',
     finalized: '已归档',
     rejected: '已驳回',
   };
@@ -49,12 +51,15 @@
     const chain = [];
     const emps = data.employees || [];
     const byId = new Map(emps.map((e) => [e.id, e]));
+    const plOwnerId = data.orgSettings?.productLineOwnerEmployeeId != null
+      ? Number(data.orgSettings.productLineOwnerEmployeeId) : null;
     let nextId = (() => {
       const cur = rmEmployeeId != null ? byId.get(Number(rmEmployeeId)) : null;
       return cur != null ? cur.managerId : null;
     })();
     const seen = new Set();
     while (nextId != null && !seen.has(Number(nextId))) {
+      if (plOwnerId != null && Number(nextId) === plOwnerId) break;
       seen.add(Number(nextId));
       chain.push(Number(nextId));
       const m = byId.get(Number(nextId));
@@ -95,7 +100,8 @@
 
   TM.effectivePerfGrade = function effectivePerfGrade(review) {
     if (!review) return '—';
-    if ((review.status === 'finalized' || review.status === 'calibrated') && review.finalGrade) return String(review.finalGrade).trim();
+    const hasF = review.status === 'finalized' || review.status === 'calibrated' || review.status === 'pl_approved' || review.status === 'pl_pending';
+    if (hasF && review.finalGrade) return String(review.finalGrade).trim();
     if (review.rmInitialGrade) return String(review.rmInitialGrade).trim();
     return '—';
   };
@@ -103,8 +109,8 @@
   /**
    * Compute talent-review performance rating (A/B/C) from annual reviews.
    *   A: annual A-tier (A+/A/A-) >= 50 % AND no C/C-
-   *   C: annual B-tier (B+/B) >= 50 % OR has any C/C-
-   *   B: everything else (no C/C-, A-tier < 50 %, B-tier < 50 %)
+   *   B: annual B-tier (B+/B) majority, no C/C-
+   *   C: has any C/C-
    */
   TM.computePerfRatingFromReviews = function computePerfRatingFromReviews(reviews, cycles) {
     const cycleMap = new Map((cycles || []).map((c) => [c.id, c]));
@@ -118,11 +124,9 @@
     if (!annualGrades.length) return 'B';
     const total = annualGrades.length;
     const aTier = annualGrades.filter((g) => g === 'A+' || g === 'A' || g === 'A-').length;
-    const bTier = annualGrades.filter((g) => g === 'B+' || g === 'B').length;
     const hasCTier = annualGrades.some((g) => g === 'C' || g === 'C-');
     if (hasCTier) return 'C';
     if (aTier / total >= 0.5) return 'A';
-    if (bTier / total >= 0.5) return 'C';
     return 'B';
   };
 
@@ -139,7 +143,8 @@
    */
   TM.allGradesForDisplay = function allGradesForDisplay(reviews, cycles) {
     const cycleMap = new Map((cycles || []).map((c) => [c.id, c]));
-    const finalized = (reviews || []).filter((r) => (r.status === 'finalized' || r.status === 'calibrated') && r.finalGrade);
+    const DONE = { finalized: 1, calibrated: 1, pl_approved: 1 };
+    const finalized = (reviews || []).filter((r) => DONE[r.status] && r.finalGrade);
     finalized.sort((a, b) => {
       const ca = cycleMap.get(a.cycleId);
       const cb = cycleMap.get(b.cycleId);
@@ -158,12 +163,30 @@
     }).join(', ');
   };
 
+  TM.allGradesStructured = function allGradesStructured(reviews, cycles) {
+    const cycleMap = new Map((cycles || []).map((c) => [c.id, c]));
+    const DONE = { finalized: 1, calibrated: 1, pl_approved: 1 };
+    const finalized = (reviews || []).filter((r) => DONE[r.status] && r.finalGrade);
+    finalized.sort((a, b) => {
+      const ca = cycleMap.get(a.cycleId);
+      const cb = cycleMap.get(b.cycleId);
+      const sa = ca ? ca.startDate : (a.createdAt || '');
+      const sb = cb ? cb.startDate : (b.createdAt || '');
+      return String(sb).localeCompare(String(sa));
+    });
+    return finalized.map((r) => {
+      const c = cycleMap.get(r.cycleId);
+      return { grade: String(r.finalGrade).trim(), annual: !!(c && c.cycleType === 'year') };
+    });
+  };
+
   /**
    * Plain text version for export / hover.
    */
   TM.allGradesPlainText = function allGradesPlainText(reviews, cycles) {
     const cycleMap = new Map((cycles || []).map((c) => [c.id, c]));
-    const finalized = (reviews || []).filter((r) => (r.status === 'finalized' || r.status === 'calibrated') && r.finalGrade);
+    const DONE = { finalized: 1, calibrated: 1, pl_approved: 1 };
+    const finalized = (reviews || []).filter((r) => DONE[r.status] && r.finalGrade);
     finalized.sort((a, b) => {
       const ca = cycleMap.get(a.cycleId);
       const cb = cycleMap.get(b.cycleId);
@@ -216,6 +239,9 @@
       } else if (status === 'manager' || status === 'hr') {
         status = 'in_approval';
         rowChanged = true;
+      } else if (status === 'pl_approved' && !r._newFlowPlApproved) {
+        status = 'pl_pending';
+        rowChanged = true;
       }
       if (!TM.PERF_VALID_STATUSES.includes(status)) {
         status = 'rm_pending';
@@ -247,8 +273,8 @@
       let pendingApproverId = r.pendingApproverId != null ? Number(r.pendingApproverId) : null;
       const approvalLog = Array.isArray(r.approvalLog) ? [...r.approvalLog] : [];
 
-      if (status === 'finalized' || status === 'calibrated' || status === 'pl_approved') {
-        if ((status === 'finalized' || status === 'calibrated') && !finalGrade && rmInitialGrade) {
+      if (status === 'finalized' || status === 'calibrated' || status === 'pl_approved' || status === 'pl_pending') {
+        if ((status === 'finalized' || status === 'calibrated' || status === 'pl_approved') && !finalGrade && rmInitialGrade) {
           finalGrade = rmInitialGrade;
           rowChanged = true;
         }
@@ -269,13 +295,15 @@
         }
         if (approvalStepIndex !== 0) { approvalStepIndex = 0; rowChanged = true; }
         if (pendingApproverId !== reviewerId) { pendingApproverId = reviewerId; rowChanged = true; }
+      } else if (status === 'rm_evaluated') {
+        if (pendingApproverId != null) { pendingApproverId = null; rowChanged = true; }
       } else if (status === 'in_approval') {
         if (!approvalChain.length && reviewerId != null) {
           approvalChain = TM.buildApprovalChainAboveRm(store, reviewerId);
           rowChanged = true;
         }
         if (!approvalChain.length) {
-          status = 'pl_approved';
+          status = 'pl_pending';
           pendingApproverId = null;
           rowChanged = true;
         } else {

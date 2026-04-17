@@ -1,9 +1,9 @@
 /**
- * HRBP User Management — super_admin only
- * Features:
- *   - HRBP user CRUD (super_admin / admin / intern)
- *   - Manager permission matrix (module access + granular ops)
- *   - RM nomination approval queue
+ * Admin User Management — super_admin only (global view)
+ * Decoupled from per-product-line context:
+ *   - isPlOwnerAnywhere() scans ALL product lines
+ *   - empName() resolves via homeLineId
+ *   - Users displayed in HR vs Employee categories
  */
 (function () {
   const { computed, ref, reactive, watch } = Vue;
@@ -23,13 +23,53 @@
     window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: type || 'info' } }));
   }
 
-  window.TM.HrbpUserManagement = {
-    name: 'HrbpUserManagement',
+  /** Scan all product lines to determine if a user is PLO anywhere */
+  function isPlOwnerAnywhere(u, productLineStore) {
+    if (u.employeeId == null) return false;
+    var eid = Number(u.employeeId);
+    var lines = productLineStore.lines || [];
+    for (var i = 0; i < lines.length; i++) {
+      var settings = window.TM.loadKeyForLine(lines[i].id, 'orgSettings', null);
+      if (settings && Number(settings.productLineOwnerEmployeeId) === eid) return true;
+    }
+    return false;
+  }
+
+  /** Find which product line(s) a user is PLO for */
+  function ploLineNames(u, productLineStore) {
+    if (u.employeeId == null) return '';
+    var eid = Number(u.employeeId);
+    var lines = productLineStore.lines || [];
+    var names = [];
+    for (var i = 0; i < lines.length; i++) {
+      var settings = window.TM.loadKeyForLine(lines[i].id, 'orgSettings', null);
+      if (settings && Number(settings.productLineOwnerEmployeeId) === eid) {
+        names.push(lines[i].name);
+      }
+    }
+    return names.join('、');
+  }
+
+  /** Resolve employee name from homeLineId (global, no current-line dependency) */
+  function empName(eid, homeLineId) {
+    if (eid == null) return '—';
+    if (homeLineId != null) {
+      var lineEmps = window.TM.loadKeyForLine(homeLineId, 'employees', null);
+      if (Array.isArray(lineEmps)) {
+        var found = lineEmps.find(function (x) { return x.id === eid; });
+        if (found) return found.name + ' (' + eid + ')';
+      }
+    }
+    return String(eid);
+  }
+
+  window.TM.AdminUserManagement = {
+    name: 'AdminUserManagement',
     template: `
     <div class="page-stack">
       <div class="card pad">
         <h2 class="section-title"><i class="fa-solid fa-user-shield"></i> 用户管理</h2>
-        <p class="muted small">管理所有用户的角色、模块访问和操作权限。仅 HRBP 超级管理员可操作。</p>
+        <p class="muted small">全局视角管理所有用户的角色、模块访问和操作权限。不依赖当前产品线。仅超级管理员可操作。</p>
       </div>
 
       <!-- Tabs -->
@@ -58,49 +98,85 @@
               <span>筛选</span>
               <select v-model="filterRole" class="input input-sm" style="min-width:120px">
                 <option value="">全部</option>
-                <option value="hrbp">HRBP</option>
-                <option value="manager">汇报经理</option>
+                <option value="hrbp">HRBP / 管理员</option>
+                <option value="manager">员工账号 / 汇报经理</option>
                 <option value="product_line_owner">产品线负责人</option>
               </select>
             </label>
           </div>
-          <div style="overflow:auto">
+
+          <!-- HR / Admin section -->
+          <h3 v-if="!filterRole || filterRole === 'hrbp'" class="section-title" style="font-size:0.9rem;margin:12px 0 8px"><i class="fa-solid fa-shield-halved"></i> HR / 管理员账号</h3>
+          <div v-if="!filterRole || filterRole === 'hrbp'" style="overflow:auto">
             <table class="data-table compact">
               <thead>
                 <tr>
                   <th>用户名</th><th>邮箱</th><th>姓名</th><th>角色</th>
-                  <th>子类型 / 状态</th><th>关联员工</th><th>产品线</th><th>模块</th><th style="min-width:80px"></th>
+                  <th>子类型</th><th>可用产品线</th><th>模块</th><th style="min-width:80px"></th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="u in filteredUsers" :key="u.id" :class="{ 'um-pending-row': u.rmStatus === 'pending_approval' }">
+                <tr v-for="u in hrUsers" :key="u.id">
                   <td style="font-weight:600">{{ u.username }}</td>
                   <td class="muted small">{{ u.email || '—' }}</td>
                   <td>{{ u.realName || '—' }}</td>
-                  <td><span class="tag" :class="listRoleTagClass(u)">{{ roleLabel(u) }}</span></td>
-                  <td>
-                    <span v-if="isPlOwner(u)" class="tag tag-product-line-owner">产品线负责人</span>
-                    <span v-else-if="u.role === 'hrbp'" class="tag" :class="subTypeClass(u)">{{ subTypeLabel(u) }}</span>
-                    <span v-else class="tag" :class="rmStatusClass(u)">{{ rmStatusLabel(u) }}</span>
-                  </td>
-                  <td class="muted small">{{ empName(u.employeeId, u.homeLineId) }}</td>
+                  <td><span class="tag tag-hrbp">HRBP</span></td>
+                  <td><span class="tag" :class="subTypeClass(u)">{{ subTypeLabel(u) }}</span></td>
                   <td class="muted small">{{ userLineLabel(u) }}</td>
                   <td>
-                    <template v-if="u.role === 'hrbp' && u.hrbpSubType === 'intern'">
+                    <template v-if="u.hrbpSubType === 'intern'">
                       <span v-for="m in allHrbpModules" :key="m" class="tag tag-mod" :class="{ 'tag-mod-on': internHasModule(u, m), 'tag-mod-off': !internHasModule(u, m) }" style="margin-right:2px;font-size:0.7rem">{{ moduleLabel(m) }}</span>
                     </template>
-                    <template v-else-if="u.role === 'manager' && !isPlOwner(u)">
+                    <span v-else class="muted small">全部</span>
+                  </td>
+                  <td class="row-actions">
+                    <button v-if="canEditUser(u)" type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)" title="编辑"><i class="fa-solid fa-pen"></i></button>
+                    <button v-if="canDeleteUser(u)" type="button" class="btn btn-ghost btn-sm" style="color:#dc2626" @click="deleteUser(u)" title="删除"><i class="fa-solid fa-trash"></i></button>
+                  </td>
+                </tr>
+                <tr v-if="!hrUsers.length"><td colspan="8" class="muted" style="text-align:center;padding:1rem">暂无 HR 用户</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Employee / Manager section -->
+          <h3 v-if="!filterRole || filterRole === 'manager' || filterRole === 'product_line_owner'" class="section-title" style="font-size:0.9rem;margin:20px 0 8px"><i class="fa-solid fa-people-group"></i> 员工账号 / 汇报经理</h3>
+          <div v-if="!filterRole || filterRole === 'manager' || filterRole === 'product_line_owner'" style="overflow:auto">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>用户名</th><th>邮箱</th><th>姓名</th><th>角色</th>
+                  <th>状态</th><th>关联员工</th><th>所属产品线</th><th>模块</th><th style="min-width:80px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="u in empUsers" :key="u.id" :class="{ 'um-pending-row': u.rmStatus === 'pending_approval' }">
+                  <td style="font-weight:600">{{ u.username }}</td>
+                  <td class="muted small">{{ u.email || '—' }}</td>
+                  <td>{{ u.realName || '—' }}</td>
+                  <td>
+                    <span v-if="isPlOwner(u)" class="tag tag-product-line-owner">产品线负责人</span>
+                    <span v-else class="tag tag-mgr">汇报经理</span>
+                  </td>
+                  <td>
+                    <span v-if="isPlOwner(u)" class="tag tag-ok">{{ ploLines(u) }}</span>
+                    <span v-else class="tag" :class="rmStatusClass(u)">{{ rmStatusLabel(u) }}</span>
+                  </td>
+                  <td class="muted small">{{ resolveEmpName(u.employeeId, u.homeLineId) }}</td>
+                  <td class="muted small">{{ userLineLabel(u) }}</td>
+                  <td>
+                    <template v-if="!isPlOwner(u)">
                       <span v-for="m in allMgrModules" :key="m" class="tag tag-mod" :class="{ 'tag-mod-on': mgrHasModule(u, m), 'tag-mod-off': !mgrHasModule(u, m) }" style="margin-right:2px;font-size:0.7rem">{{ moduleLabel(m) }}</span>
                     </template>
                     <span v-else class="muted small">全部</span>
                   </td>
                   <td class="row-actions">
                     <button v-if="canEditUser(u)" type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)" title="编辑"><i class="fa-solid fa-pen"></i></button>
-                    <button v-if="u.role==='manager' && !isPlOwner(u)" type="button" class="btn btn-ghost btn-sm" @click="openPermEdit(u)" title="权限配置"><i class="fa-solid fa-sliders"></i></button>
+                    <button v-if="!isPlOwner(u)" type="button" class="btn btn-ghost btn-sm" @click="openPermEdit(u)" title="权限配置"><i class="fa-solid fa-sliders"></i></button>
                     <button v-if="canDeleteUser(u)" type="button" class="btn btn-ghost btn-sm" style="color:#dc2626" @click="deleteUser(u)" title="删除"><i class="fa-solid fa-trash"></i></button>
                   </td>
                 </tr>
-                <tr v-if="!filteredUsers.length"><td colspan="9" class="muted" style="text-align:center;padding:1.5rem">暂无用户</td></tr>
+                <tr v-if="!empUsers.length"><td colspan="9" class="muted" style="text-align:center;padding:1rem">暂无员工账号</td></tr>
               </tbody>
             </table>
           </div>
@@ -111,15 +187,16 @@
       <template v-if="tab==='pending'">
         <div class="card pad">
           <h3 class="section-title">待审批的 RM 账号</h3>
-          <p class="muted small">员工在上传文档中被识别为 RM，或在系统中被提名为 RM 后，需要 HRBP 超级管理员审批确认其操作权限。</p>
+          <p class="muted small">员工在上传文档中被识别为 RM，或在系统中被提名为 RM 后，需要超级管理员审批确认其操作权限。</p>
           <table v-if="pendingRMs.length" class="data-table compact" style="margin-top:12px">
-            <thead><tr><th>用户名</th><th>邮箱</th><th>姓名</th><th>关联员工</th><th>提名来源</th><th></th></tr></thead>
+            <thead><tr><th>用户名</th><th>邮箱</th><th>姓名</th><th>关联员工</th><th>所属产品线</th><th>提名来源</th><th></th></tr></thead>
             <tbody>
               <tr v-for="u in pendingRMs" :key="u.id">
                 <td style="font-weight:600">{{ u.username }}</td>
                 <td class="muted small">{{ u.email || '—' }}</td>
                 <td>{{ u.realName || '—' }}</td>
-                <td class="muted small">{{ empName(u.employeeId, u.homeLineId) }}</td>
+                <td class="muted small">{{ resolveEmpName(u.employeeId, u.homeLineId) }}</td>
+                <td class="muted small">{{ userLineLabel(u) }}</td>
                 <td class="muted small">{{ u.rmNominationSource || '手动创建' }}</td>
                 <td class="row-actions">
                   <button type="button" class="btn btn-primary btn-sm" @click="approveRM(u)"><i class="fa-solid fa-check"></i> 审批并配置</button>
@@ -177,7 +254,12 @@
         <div class="card pad">
           <h3 class="section-title">提名员工为汇报经理</h3>
           <p class="muted small">从现有员工中选择，为其创建 RM 系统账号。提名后账号进入待审批状态，需在"RM 审批队列"中确认并配置权限后方可使用。</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;max-width:600px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px;max-width:800px">
+            <label class="field"><span>选择产品线</span>
+              <select v-model.number="nomLineId" class="input">
+                <option v-for="l in allProductLines" :key="l.id" :value="l.id">{{ l.name }}</option>
+              </select>
+            </label>
             <label class="field"><span>选择员工</span>
               <select v-model.number="nomEmpId" class="input">
                 <option :value="null">— 请选择 —</option>
@@ -207,7 +289,6 @@
               <select v-model="form.role" class="input">
                 <option value="hrbp">HRBP</option>
                 <option value="manager">汇报经理</option>
-                <option value="product_line_owner">产品线负责人</option>
               </select>
             </label>
             <label v-if="form.role === 'hrbp'" class="field"><span>HRBP 子类型</span>
@@ -215,6 +296,11 @@
                 <option value="super_admin">超级管理员</option>
                 <option value="admin">管理员</option>
                 <option value="intern">实习生</option>
+              </select>
+            </label>
+            <label v-if="form.role === 'manager'" class="field"><span>所属产品线</span>
+              <select v-model.number="form.homeLineId" class="input">
+                <option v-for="l in allProductLines" :key="l.id" :value="l.id">{{ l.name }}</option>
               </select>
             </label>
             <label class="field"><span>关联员工</span>
@@ -297,15 +383,13 @@
         </div>
       </div>
     </div>
-  `,
+    `,
     setup() {
       const data = useDataStore();
       const auth = useAuthStore();
 
       if (!auth.canManageUsers) {
-        window.dispatchEvent(new CustomEvent('tm-toast', {
-          detail: { message: '无权访问用户管理页面', type: 'error' },
-        }));
+        toast('无权访问用户管理页面', 'error');
         window.TM.router?.push(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
         return {};
       }
@@ -316,12 +400,13 @@
       const productLineStore = window.TM.useProductLineStore();
 
       function emptyForm() {
-        const curLineId = productLineStore.currentLineId;
+        var firstLineId = (productLineStore.lines || [])[0]?.id || null;
         return {
           username: '', email: '', password: '', realName: '',
           role: 'hrbp', hrbpSubType: 'admin', employeeId: null,
+          homeLineId: firstLineId,
           allowedModules: ['recruitment'],
-          allowedLineIds: curLineId ? [curLineId] : [],
+          allowedLineIds: firstLineId ? [firstLineId] : [],
         };
       }
 
@@ -336,6 +421,7 @@
       const permTarget = ref(null);
       const permForm = reactive({ modules: [], ops: {} });
 
+      const nomLineId = ref((productLineStore.lines || [])[0]?.id || null);
       const nomEmpId = ref(null);
       const nomPassword = ref('');
 
@@ -345,47 +431,59 @@
       const allProductLines = computed(() => productLineStore.lines || []);
       const showLinePerms = computed(() => {
         if (allProductLines.value.length <= 1) return false;
-        const r = form.value.role;
+        var r = form.value.role;
         if (r === 'hrbp') {
-          const sub = form.value.hrbpSubType;
+          var sub = form.value.hrbpSubType;
           return sub === 'admin' || sub === 'intern';
         }
         return false;
       });
       function toggleLineId(lineId, ev) {
-        const ids = form.value.allowedLineIds;
+        var ids = form.value.allowedLineIds;
         if (ev.target.checked) { if (!ids.includes(lineId)) ids.push(lineId); }
-        else { const idx = ids.indexOf(lineId); if (idx >= 0) ids.splice(idx, 1); }
+        else { var idx = ids.indexOf(lineId); if (idx >= 0) ids.splice(idx, 1); }
       }
 
       const allUsers = computed(() => data.users || []);
-      const filteredUsers = computed(() => {
-        const users = allUsers.value;
-        if (!filterRole.value) return users;
+
+      const hrUsers = computed(function () {
+        return allUsers.value.filter(function (u) { return u.role === 'hrbp'; });
+      });
+      const empUsers = computed(function () {
+        var users = allUsers.value.filter(function (u) { return u.role === 'manager'; });
         if (filterRole.value === 'product_line_owner') {
           return users.filter(function (u) { return isPlOwner(u); });
         }
-        return users.filter(function (u) {
-          if (isPlOwner(u)) return filterRole.value === 'manager';
-          if (filterRole.value === 'hrbp') return u.role === 'hrbp';
-          return u.role === filterRole.value;
-        });
+        return users;
       });
+
+      const filteredUsers = computed(() => allUsers.value);
+
       const pendingRMs = computed(() =>
         allUsers.value.filter(function (u) { return u.role === 'manager' && u.rmStatus === 'pending_approval'; }),
       );
-      const empOptions = computed(() =>
-        (data.employees || []).filter(function (e) { return e.status !== 'leave'; }),
-      );
-      const nominatableEmps = computed(() => {
-        const existingEmpIds = new Set();
-        allUsers.value.forEach(function (u) { if (u.employeeId != null) existingEmpIds.add(u.employeeId); });
-        return empOptions.value.filter(function (e) { return !existingEmpIds.has(e.id); });
+
+      function getLineEmployees(lineId) {
+        if (lineId == null) return [];
+        var emps = window.TM.loadKeyForLine(lineId, 'employees', null);
+        return Array.isArray(emps) ? emps.filter(function (e) { return e.status !== 'leave'; }) : [];
+      }
+
+      var empOptions = computed(function () {
+        var lineId = form.value.homeLineId || productLineStore.currentLineId;
+        return getLineEmployees(lineId);
       });
 
-      const filteredEmpOptions = computed(function () {
-        const q = (empSearchText.value || '').trim().toLowerCase();
-        const list = empOptions.value;
+      var nominatableEmps = computed(function () {
+        var lineEmps = getLineEmployees(nomLineId.value);
+        var existingEmpIds = new Set();
+        allUsers.value.forEach(function (u) { if (u.employeeId != null) existingEmpIds.add(u.employeeId); });
+        return lineEmps.filter(function (e) { return !existingEmpIds.has(e.id); });
+      });
+
+      var filteredEmpOptions = computed(function () {
+        var q = (empSearchText.value || '').trim().toLowerCase();
+        var list = empOptions.value;
         if (!q) return list.slice(0, 50);
         return list.filter(function (e) {
           return (e.name && e.name.toLowerCase().indexOf(q) >= 0)
@@ -394,10 +492,10 @@
         }).slice(0, 50);
       });
 
-      const permGroups = computed(function () {
-        const moduleOrder = allMgrModules;
-        const groups = [];
-        const map = {};
+      var permGroups = computed(function () {
+        var moduleOrder = allMgrModules;
+        var groups = [];
+        var map = {};
         permDefs.forEach(function (d) {
           if (!map[d.module]) {
             map[d.module] = { module: d.module, defs: [] };
@@ -415,60 +513,56 @@
       }
       function subTypeLabel(u) { return SUBTYPE_LABELS[u.hrbpSubType] || (u.superAdmin ? '超级管理员' : '管理员'); }
       function subTypeClass(u) {
-        const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+        var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
         return 'tag-' + st.replace(/_/g, '-');
       }
+
       function isPlOwner(u) {
-        if (u.employeeId == null) return false;
-        const ownerId = data.orgSettings?.productLineOwnerEmployeeId;
-        return ownerId != null && ownerId !== '' && Number(ownerId) === Number(u.employeeId);
+        return isPlOwnerAnywhere(u, productLineStore);
       }
-      function empName(eid, homeLineId) {
-        if (eid == null) return '—';
-        var e = data.employees.find(function (x) { return x.id === eid; });
-        if (e) return e.name + ' (' + eid + ')';
-        if (homeLineId != null && homeLineId !== productLineStore.currentLineId) {
-          var lineEmps = window.TM.loadKeyForLine(homeLineId, 'employees', null);
-          if (Array.isArray(lineEmps)) {
-            var found = lineEmps.find(function (x) { return x.id === eid; });
-            if (found) return found.name + ' (' + eid + ')';
-          }
-        }
-        return String(eid);
+      function ploLines(u) {
+        return ploLineNames(u, productLineStore) || '产品线负责人';
       }
+
+      function resolveEmpName(eid, homeLineId) {
+        return empName(eid, homeLineId);
+      }
+
       function userLineLabel(u) {
-        if (u.superAdmin || u.hrbpSubType === 'super_admin') return '全部';
-        if (isPlOwner(u)) return '全部';
-        if (Array.isArray(u.allowedLineIds) && u.allowedLineIds.length) {
-          var lines = productLineStore.lines || [];
-          var names = u.allowedLineIds.map(function (id) {
-            var l = lines.find(function (x) { return x.id === id; });
-            return l ? l.name : String(id);
-          });
-          return names.join('、');
+        if (u.superAdmin || u.hrbpSubType === 'super_admin') return '全局';
+        if (u.role === 'hrbp') {
+          if (Array.isArray(u.allowedLineIds) && u.allowedLineIds.length) {
+            var lines = productLineStore.lines || [];
+            var names = u.allowedLineIds.map(function (id) {
+              var l = lines.find(function (x) { return x.id === id; });
+              return l ? l.name : String(id);
+            });
+            return names.join('、');
+          }
+          return '全局';
+        }
+        if (isPlOwner(u)) {
+          return ploLineNames(u, productLineStore) || '—';
         }
         var hlid = u.homeLineId;
         if (hlid != null) {
           var hl = (productLineStore.lines || []).find(function (x) { return x.id === hlid; });
           return hl ? hl.name : String(hlid);
         }
-        var curLine = (productLineStore.lines || []).find(function (x) { return x.id === productLineStore.currentLineId; });
-        return curLine ? curLine.name : '当前';
+        return '—';
       }
+
       function internHasModule(u, m) {
         if (m === 'recruitment') return true;
         return (u.allowedModules || []).includes(m);
       }
       function mgrHasModule(u, m) {
         if (m === 'dashboard') return true;
-        const perms = u.managerPermissions;
+        var perms = u.managerPermissions;
         if (!perms || !perms.modules) return true;
         return perms.modules.includes(m);
       }
       function moduleLabel(m) { return MODULE_LABELS[m] || m; }
-      function moduleShort(m) {
-        return { dashboard: 'D', roster: 'R', org: 'O', recruitment: '招', talent: 'T', performance: 'P', attendance: 'A' }[m] || m.charAt(0).toUpperCase();
-      }
       function rmStatusLabel(u) {
         if (u.rmStatus === 'pending_approval') return '待审批';
         if (u.rmStatus === 'revoked') return '已撤销';
@@ -493,10 +587,6 @@
         empSearchText.value = '';
       }
 
-      function listRoleTagClass(u) {
-        if (isPlOwner(u)) return 'tag-product-line-owner';
-        return u.role === 'hrbp' ? 'tag-hrbp' : 'tag-mgr';
-      }
       function permRoleTagClass(u) {
         if (isPlOwner(u)) return 'tag-product-line-owner';
         return u.role === 'hrbp' ? 'tag-hrbp' : 'tag-mgr';
@@ -504,7 +594,7 @@
 
       function userHasModule(u, m) {
         if (u.role === 'hrbp') {
-          const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+          var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'super_admin') return true;
           if (st === 'admin' || st === 'product_line_owner') {
             if (!u.allowedModules) return true;
@@ -520,10 +610,10 @@
         return true;
       }
       function userHasOp(u, key) {
-        const def = permDefs.find(function (d) { return d.key === key; });
-        const mod = def ? def.module : key.split('.')[0];
+        var def = permDefs.find(function (d) { return d.key === key; });
+        var mod = def ? def.module : key.split('.')[0];
         if (u.role === 'hrbp') {
-          const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+          var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'super_admin') return true;
           if (!userHasModule(u, mod)) return false;
           if (st === 'admin' || st === 'product_line_owner') {
@@ -538,7 +628,7 @@
           if (isPlOwner(u)) return true;
           if (u.rmStatus === 'pending_approval') return false;
           if (!userHasModule(u, mod)) return false;
-          const perms = u.managerPermissions;
+          var perms = u.managerPermissions;
           if (!perms || !perms.ops) return true;
           return perms.ops[key] !== false;
         }
@@ -549,24 +639,22 @@
         if (auth.effectiveSubType !== 'super_admin') return false;
         if (isPlOwner(u)) return false;
         if (u.role === 'hrbp') {
-          const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+          var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'super_admin') return false;
           return true;
         }
-        if (u.role === 'manager') {
-          return true;
-        }
+        if (u.role === 'manager') return true;
         return false;
       }
       function toggleMatrixModule(u, m) {
         if (!canTogglePerm(u)) return;
-        const moduleOps = permDefs.filter(function (d) { return d.module === m; }).map(function (d) { return d.key; });
+        var moduleOps = permDefs.filter(function (d) { return d.module === m; }).map(function (d) { return d.key; });
         if (u.role === 'hrbp') {
-          const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+          var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'intern') {
             if (m === 'recruitment') return;
-            const mods = u.allowedModules || [];
-            const idx = mods.indexOf(m);
+            var mods = u.allowedModules || [];
+            var idx = mods.indexOf(m);
             if (idx >= 0) {
               mods.splice(idx, 1);
               if (!u.disabledOps) u.disabledOps = {};
@@ -577,12 +665,12 @@
             }
             u.allowedModules = mods;
           } else if (st === 'admin' || st === 'product_line_owner') {
-            let turningOff;
+            var turningOff;
             if (!u.allowedModules) {
               u.allowedModules = allHrbpModules.filter(function (x) { return x !== m; });
               turningOff = true;
             } else {
-              const mi = u.allowedModules.indexOf(m);
+              var mi = u.allowedModules.indexOf(m);
               if (mi >= 0) { u.allowedModules.splice(mi, 1); turningOff = true; }
               else { u.allowedModules.push(m); turningOff = false; }
             }
@@ -595,8 +683,8 @@
           }
         } else if (u.role === 'manager') {
           if (m === 'dashboard') return;
-          const perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
-          const mi2 = perms.modules.indexOf(m);
+          var perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+          var mi2 = perms.modules.indexOf(m);
           if (mi2 >= 0) {
             perms.modules.splice(mi2, 1);
             moduleOps.forEach(function (k) { perms.ops[k] = false; });
@@ -614,11 +702,11 @@
       }
       function toggleMatrixOp(u, key) {
         if (!canTogglePerm(u)) return;
-        const def = permDefs.find(function (d) { return d.key === key; });
-        const mod = def ? def.module : key.split('.')[0];
+        var def = permDefs.find(function (d) { return d.key === key; });
+        var mod = def ? def.module : key.split('.')[0];
         if (!userHasModule(u, mod)) return;
         if (u.role === 'hrbp') {
-          const st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
+          var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'admin' || st === 'product_line_owner' || st === 'intern') {
             if (!u.disabledOps) u.disabledOps = {};
             u.disabledOps[key] = !u.disabledOps[key];
@@ -630,7 +718,7 @@
             data._markDirty('users'); data.persistAll();
           }
         } else if (u.role === 'manager') {
-          const perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+          var perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
           perms.ops[key] = perms.ops[key] === false ? true : false;
           u.managerPermissions = perms;
           if (u.id === auth.currentUser?.id) {
@@ -661,53 +749,43 @@
       function openEdit(u) {
         modalMode.value = 'edit';
         editingUserId.value = u.id;
-        let formRole = u.role || 'hrbp';
-        const formSubType = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
-        if (u.employeeId != null && data.orgSettings?.productLineOwnerEmployeeId === u.employeeId) {
-          formRole = 'product_line_owner';
-        }
         form.value = {
           username: u.username || '', email: u.email || '', password: '', realName: u.realName || '',
-          role: formRole, hrbpSubType: formSubType,
-          employeeId: u.employeeId ?? null, allowedModules: [...(u.allowedModules || ['recruitment'])],
-          allowedLineIds: [...(u.allowedLineIds || (productLineStore.currentLineId ? [productLineStore.currentLineId] : []))],
+          role: u.role || 'hrbp',
+          hrbpSubType: u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin'),
+          employeeId: u.employeeId ?? null,
+          homeLineId: u.homeLineId || (productLineStore.lines || [])[0]?.id || null,
+          allowedModules: [...(u.allowedModules || ['recruitment'])],
+          allowedLineIds: [...(u.allowedLineIds || [])],
         };
         if (u.employeeId != null) {
-          const emp = (data.employees || []).find(function (e) { return e.id === u.employeeId; });
-          empSearchText.value = emp ? emp.name + ' (' + emp.id + ')' : String(u.employeeId);
+          empSearchText.value = resolveEmpName(u.employeeId, u.homeLineId);
         } else {
           empSearchText.value = '';
         }
         modalOpen.value = true;
       }
       function toggleModule(m, ev) {
-        const mods = form.value.allowedModules;
+        var mods = form.value.allowedModules;
         if (ev.target.checked) { if (!mods.includes(m)) mods.push(m); }
-        else { const idx = mods.indexOf(m); if (idx >= 0 && m !== 'recruitment') mods.splice(idx, 1); }
+        else { var idx = mods.indexOf(m); if (idx >= 0 && m !== 'recruitment') mods.splice(idx, 1); }
       }
       function saveUser() {
-        const f = form.value;
+        var f = form.value;
         if (!f.username && !f.email) { toast('请填写用户名或邮箱', 'error'); return; }
         if (modalMode.value === 'add') {
           if (!f.password) { toast('新用户必须设置密码', 'error'); return; }
-          const dup = data.users.find(function (u) {
+          var dup = data.users.find(function (u) {
             return (f.username && u.username === f.username) || (f.email && String(u.email || '').toLowerCase() === f.email.toLowerCase());
           });
           if (dup) { toast('用户名或邮箱已存在', 'error'); return; }
-          const maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
-          const newUser = {
+          var maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
+          var newUser = {
             id: maxId + 1, username: f.username, email: f.email, password: f.password, realName: f.realName,
-            role: f.role, employeeId: f.employeeId, homeLineId: productLineStore.currentLineId,
+            role: f.role, employeeId: f.employeeId,
+            homeLineId: f.role === 'manager' ? f.homeLineId : null,
           };
-          if (f.role === 'product_line_owner') {
-            newUser.role = 'manager';
-            newUser.rmStatus = 'active';
-            newUser.managerPermissions = { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
-            if (f.employeeId != null) {
-              data.orgSettings = { ...data.orgSettings, productLineOwnerEmployeeId: f.employeeId };
-              data._markDirty('orgSettings');
-            }
-          } else if (f.role === 'hrbp') {
+          if (f.role === 'hrbp') {
             newUser.hrbpSubType = f.hrbpSubType;
             if (f.hrbpSubType === 'super_admin') newUser.superAdmin = true;
             if (f.hrbpSubType === 'intern') newUser.allowedModules = [...f.allowedModules];
@@ -721,28 +799,15 @@
           }
           data.users.push(newUser);
         } else {
-          const user = data.users.find(function (u) { return u.id === editingUserId.value; });
+          var user = data.users.find(function (u) { return u.id === editingUserId.value; });
           if (!user) { toast('用户不存在', 'error'); return; }
           user.username = f.username; user.email = f.email; user.realName = f.realName; user.employeeId = f.employeeId;
           if (f.password) user.password = f.password;
-          if (f.role === 'product_line_owner') {
-            user.role = 'manager';
-            user.hrbpSubType = undefined;
-            user.superAdmin = false;
-            user.allowedModules = undefined;
-            user.allowedLineIds = undefined;
-            if (!user.managerPermissions) {
-              user.managerPermissions = { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
-            }
-            user.rmStatus = 'active';
-            if (f.employeeId != null) {
-              data.orgSettings = { ...data.orgSettings, productLineOwnerEmployeeId: f.employeeId };
-              data._markDirty('orgSettings');
-            }
-          } else if (f.role === 'hrbp') {
+          if (f.role === 'hrbp') {
             user.role = 'hrbp';
             user.hrbpSubType = f.hrbpSubType;
             user.superAdmin = f.hrbpSubType === 'super_admin';
+            user.homeLineId = null;
             user.allowedModules = f.hrbpSubType === 'intern' ? [...f.allowedModules] : undefined;
             if (f.hrbpSubType === 'admin' || f.hrbpSubType === 'intern') {
               user.allowedLineIds = [...f.allowedLineIds];
@@ -751,7 +816,8 @@
             }
             user.managerPermissions = undefined; user.rmStatus = undefined;
           } else {
-            user.role = f.role;
+            user.role = 'manager';
+            user.homeLineId = f.homeLineId;
             user.hrbpSubType = undefined; user.superAdmin = undefined; user.allowedModules = undefined;
             user.allowedLineIds = undefined;
             if (!user.managerPermissions) {
@@ -770,29 +836,29 @@
       }
       function deleteUser(u) {
         if (!window.confirm('确定删除用户「' + (u.username || u.email) + '」？此操作不可恢复。')) return;
-        const idx = data.users.findIndex(function (x) { return x.id === u.id; });
+        var idx = data.users.findIndex(function (x) { return x.id === u.id; });
         if (idx >= 0) { data.users.splice(idx, 1); data._markDirty('users'); data.persistAll(); toast('用户已删除', 'success'); }
       }
 
       /* ── RM permission config ── */
       function openPermEdit(u) {
         permTarget.value = u;
-        const perms = u.managerPermissions || {};
+        var perms = u.managerPermissions || {};
         permForm.modules = [...(perms.modules || allMgrModules.slice())];
-        const ops = perms.ops || window.TM.RM_ALL_OPS_ON();
+        var ops = perms.ops || window.TM.RM_ALL_OPS_ON();
         permForm.ops = {};
         permDefs.forEach(function (d) { permForm.ops[d.key] = ops[d.key] !== false; });
         permModalOpen.value = true;
       }
       function togglePermModule(m, ev) {
         if (ev.target.checked) { if (!permForm.modules.includes(m)) permForm.modules.push(m); }
-        else { const idx = permForm.modules.indexOf(m); if (idx >= 0 && m !== 'dashboard') permForm.modules.splice(idx, 1); }
+        else { var idx = permForm.modules.indexOf(m); if (idx >= 0 && m !== 'dashboard') permForm.modules.splice(idx, 1); }
       }
       function toggleGroupAll(grp, val) {
         grp.defs.forEach(function (d) { permForm.ops[d.key] = val; });
       }
-      function savePermissions() {
-        const u = data.users.find(function (x) { return x.id === permTarget.value?.id; });
+      var savePermissions = function () {
+        var u = data.users.find(function (x) { return x.id === permTarget.value?.id; });
         if (!u) return;
         u.managerPermissions = {
           modules: [...permForm.modules],
@@ -804,17 +870,32 @@
         }
         data._markDirty('users'); data.persistAll();
         permModalOpen.value = false;
+
+        if (_approvalPending.value != null) {
+          var pending = data.users.find(function (x) { return x.id === _approvalPending.value; });
+          if (pending && pending.rmStatus === 'pending_approval') {
+            pending.rmStatus = 'active';
+            if (pending.id === auth.currentUser?.id) {
+              auth.currentUser = { ...auth.currentUser, rmStatus: 'active', managerPermissions: pending.managerPermissions };
+              auth.persistSession();
+            }
+            data._markDirty('users'); data.persistAll();
+            toast('RM 账号已审批激活', 'success');
+            _approvalPending.value = null;
+            return;
+          }
+        }
         toast('权限已更新', 'success');
-      }
+      };
 
       /* ── RM approval ── */
-      const _approvalPending = ref(null);
+      var _approvalPending = ref(null);
       function approveRM(u) {
         permTarget.value = u;
         _approvalPending.value = u.id;
-        const perms = u.managerPermissions || {};
+        var perms = u.managerPermissions || {};
         permForm.modules = [...(perms.modules || allMgrModules.slice())];
-        const ops = perms.ops || window.TM.RM_ALL_OPS_ON();
+        var ops = perms.ops || window.TM.RM_ALL_OPS_ON();
         permForm.ops = {};
         permDefs.forEach(function (d) { permForm.ops[d.key] = ops[d.key] !== false; });
         permModalOpen.value = true;
@@ -822,23 +903,6 @@
       watch(permModalOpen, function (v) {
         if (!v) _approvalPending.value = null;
       });
-      const _origSavePerms = savePermissions;
-      savePermissions = function () {
-        const pendingId = _approvalPending.value;
-        _origSavePerms();
-        if (pendingId != null) {
-          const u = data.users.find(function (x) { return x.id === pendingId; });
-          if (u && u.rmStatus === 'pending_approval') {
-            u.rmStatus = 'active';
-            if (u.id === auth.currentUser?.id) {
-              auth.currentUser = { ...auth.currentUser, rmStatus: 'active', managerPermissions: u.managerPermissions };
-              auth.persistSession();
-            }
-            data._markDirty('users'); data.persistAll();
-            toast('RM 账号已审批激活', 'success');
-          }
-        }
-      };
       function rejectRM(u) {
         if (!window.confirm('确定拒绝「' + (u.realName || u.username) + '」的 RM 权限申请？')) return;
         u.rmStatus = 'revoked';
@@ -846,17 +910,19 @@
         toast('已拒绝', 'info');
       }
 
-      /* ── RM nomination ── */
+      /* ── RM nomination (with line selection) ── */
       function nominateRM() {
-        const empId = nomEmpId.value;
-        const pwd = nomPassword.value;
+        var empId = nomEmpId.value;
+        var pwd = nomPassword.value;
+        var lineId = nomLineId.value;
         if (!empId || !pwd) return;
-        const emp = data.employees.find(function (e) { return e.id === empId; });
+        var lineEmps = window.TM.loadKeyForLine(lineId, 'employees', null);
+        var emp = Array.isArray(lineEmps) ? lineEmps.find(function (e) { return e.id === empId; }) : null;
         if (!emp) { toast('员工不存在', 'error'); return; }
-        const existing = data.users.find(function (u) { return u.employeeId === empId; });
+        var existing = data.users.find(function (u) { return u.employeeId === empId; });
         if (existing) { toast('该员工已关联用户账号', 'error'); return; }
-        const maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
-        const email = emp.email || (emp.name + '@company.com').toLowerCase().replace(/\s+/g, '');
+        var maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
+        var email = emp.email || (emp.name + '@company.com').toLowerCase().replace(/\s+/g, '');
         data.users.push({
           id: maxId + 1,
           username: email.split('@')[0],
@@ -865,7 +931,7 @@
           realName: emp.name,
           role: 'manager',
           employeeId: empId,
-          homeLineId: productLineStore.currentLineId,
+          homeLineId: lineId,
           rmStatus: 'pending_approval',
           rmNominationSource: '系统提名',
           managerPermissions: { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() },
@@ -878,11 +944,11 @@
 
       return {
         data, auth, tab, allHrbpModules, allMgrModules, permDefs, permGroups,
-        filterRole, filteredUsers, allUsers, pendingRMs, empOptions, nominatableEmps,
+        filterRole, hrUsers, empUsers, allUsers, pendingRMs,
         filteredEmpOptions, empSearchText, empDropOpen, selectEmp, clearEmpLink,
-        roleLabel, subTypeLabel, subTypeClass, isPlOwner, empName,
-        listRoleTagClass, permRoleTagClass,
-        internHasModule, mgrHasModule, moduleLabel, moduleShort,
+        roleLabel, subTypeLabel, subTypeClass, isPlOwner, ploLines, resolveEmpName,
+        permRoleTagClass,
+        internHasModule, mgrHasModule, moduleLabel,
         rmStatusLabel, rmStatusClass,
         userHasModule, userHasOp,
         canTogglePerm, toggleMatrixModule, toggleMatrixOp,
@@ -890,7 +956,7 @@
         modalOpen, modalMode, form, openAdd, openEdit, toggleModule, saveUser, deleteUser,
         permModalOpen, permTarget, permForm, openPermEdit, togglePermModule, toggleGroupAll, savePermissions,
         approveRM, rejectRM,
-        nomEmpId, nomPassword, nominateRM,
+        nomLineId, nomEmpId, nomPassword, nominateRM, nominatableEmps,
         allProductLines, showLinePerms, toggleLineId, userLineLabel,
       };
     },

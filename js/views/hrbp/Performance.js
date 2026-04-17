@@ -92,9 +92,13 @@
                 :disabled="remindCalCount===0">
                 <i class="fa-solid fa-bell"></i> 催促校准 ({{ remindCalCount }})
               </button>
-              <button type="button" class="btn btn-primary btn-sm" style="width:100%" @click="batchCalibrate"
+              <button v-if="!isPlOwner" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="batchCalibrate"
                 :disabled="batchCalCount===0">
                 <i class="fa-solid fa-check-double"></i> 一键校准 ({{ batchCalCount }})
+              </button>
+              <button v-if="isPlOwner" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="plOwnerBatchApprove"
+                :disabled="plApproveCount===0">
+                <i class="fa-solid fa-check-double"></i> 批量审批 ({{ plApproveCount }})
               </button>
               <button type="button" class="btn btn-sm" style="width:100%"
                 :class="canArchive ? 'btn-primary' : 'btn-ghost'"
@@ -122,13 +126,14 @@
                   <td>{{ r.rmInitialGrade || '—' }}</td>
                   <td class="cell-clip" style="max-width:180px" :title="r.rmComment||''">{{ r.rmComment || '—' }}</td>
                   <td><span class="tag" :class="'perf-st-'+r.status">{{ statusLabel(r.status) }}</span></td>
-                  <td><strong>{{ (r.status==='calibrated'||r.status==='finalized') ? (r.finalGrade||'—') : '—' }}</strong></td>
+                  <td><strong>{{ (['calibrated','pl_approved','finalized'].includes(r.status) && r.finalGrade) ? r.finalGrade : '—' }}</strong></td>
                   <td class="row-actions">
                     <button type="button" class="btn-link" @click="openDetail(r)">详情</button>
                     <button v-if="r.status==='rm_pending'" type="button" class="btn btn-xs btn-secondary" @click="openProxyEval(r)">代评估</button>
                     <button v-if="r.status==='in_approval'" type="button" class="btn btn-xs btn-secondary" @click="openProxyApproval(r)">代审批</button>
-                    <button v-if="r.status==='pl_approved'" type="button" class="btn btn-primary btn-xs" @click="openCalibrate(r)">校准</button>
-                    <button v-if="r.status==='calibrated'" type="button" class="btn-link" @click="openAdjust(r)">调整等级</button>
+                    <button v-if="r.status==='pl_pending' && !isPlOwner" type="button" class="btn btn-primary btn-xs" @click="openCalibrate(r)">校准</button>
+                    <button v-if="r.status==='calibrated' && isPlOwner" type="button" class="btn btn-primary btn-xs" @click="plOwnerBatchApprove">审批</button>
+                    <button v-if="canAdjust(r)" type="button" class="btn-link" @click="openAdjust(r)">调整等级</button>
                   </td>
                 </tr>
               </tbody>
@@ -175,12 +180,14 @@
         <div class="card pad">
           <h3 class="section-title">绩效周期管理</h3>
           <table class="data-table compact">
-            <thead><tr><th>名称</th><th>类型</th><th>期间</th><th>状态</th><th></th></tr></thead>
+            <thead><tr><th>名称</th><th>类型</th><th>期间</th><th>入职截止</th><th>参评人数</th><th>状态</th><th></th></tr></thead>
             <tbody>
               <tr v-for="c in allCycles" :key="c.id">
                 <td>{{ c.name }}</td>
                 <td>{{ cycleTypeLabel(c) }}</td>
                 <td>{{ c.startDate }} ~ {{ c.endDate }}</td>
+                <td>{{ c.cutoffDate || '—' }}</td>
+                <td>{{ cycleReviewCount(c.id) }}</td>
                 <td><span class="tag" :class="c.status==='open'?'tag-active':'tag-muted'">{{ c.status==='open'?'进行中':'已关闭' }}</span></td>
                 <td><button type="button" class="btn-link" @click="editCycle(c)">编辑</button></td>
               </tr>
@@ -199,7 +206,7 @@
             <div><span class="muted">周期</span><div>{{ cycleLabel(detailRow) }}</div></div>
             <div><span class="muted">状态</span><div><span class="tag" :class="'perf-st-'+detailRow.status">{{ statusLabel(detailRow.status) }}</span></div></div>
             <div><span class="muted">RM 评估</span><div>{{ detailRow.rmInitialGrade || '—' }}</div></div>
-            <div><span class="muted">最终等级</span><div><strong>{{ (detailRow.status==='calibrated'||detailRow.status==='finalized') ? (detailRow.finalGrade||'—') : '—' }}</strong></div></div>
+            <div><span class="muted">最终等级</span><div><strong>{{ (['calibrated','pl_approved','finalized'].includes(detailRow.status) && detailRow.finalGrade) ? detailRow.finalGrade : '—' }}</strong></div></div>
             <div class="full"><span class="muted">RM 评语（绩效评语）</span><div>{{ detailRow.rmComment || '—' }}</div></div>
             <div class="full"><span class="muted">产出说明</span><div>{{ detailRow.outputDescription || '—' }}</div></div>
             <div class="full"><span class="muted">沟通记录</span><div>{{ detailRow.communicationNotes || '—' }}</div></div>
@@ -253,6 +260,10 @@
       <div v-if="proxyApprModal" class="modal-backdrop" @click.self="proxyApprModal=false">
         <div class="modal card wide">
           <h3>HRBP 代审批 · {{ empName(proxyApprTarget.employeeId) }}</h3>
+          <p v-if="proxyApprTarget.approvalChain && proxyApprTarget.approvalChain.length > 1" class="muted small" style="margin-bottom:8px;">
+            <i class="fa-solid fa-layer-group"></i>
+            多级审批链（第 {{ (proxyApprTarget.approvalStepIndex || 0) + 1 }} / {{ proxyApprTarget.approvalChain.length }} 级）：通过后将自动流转至下一级审批人
+          </p>
           <div class="kv-grid" style="margin-bottom:12px">
             <div><span class="muted">当前建议等级</span><div><strong>{{ proxyApprTarget.rmInitialGrade }}</strong></div></div>
             <div><span class="muted">待审批人</span><div>{{ empName(proxyApprTarget.pendingApproverId) }}</div></div>
@@ -296,11 +307,11 @@
         </div>
       </div>
 
-      <!-- Adjust grade modal (calibrated only) -->
+      <!-- Adjust grade modal (any stage before finalized) -->
       <div v-if="adjustModal" class="modal-backdrop" @click.self="adjustModal=false">
         <div class="modal card">
           <h3>调整等级 · {{ empName(adjustTarget.employeeId) }}</h3>
-          <p class="muted small">当前等级: <strong>{{ adjustTarget.finalGrade }}</strong>（归档前可调整）</p>
+          <p class="muted small">当前等级: <strong>{{ adjustTarget.finalGrade || adjustTarget.rmInitialGrade || '—' }}</strong>（归档前可调整）</p>
           <form class="form-grid" @submit.prevent="doAdjust">
             <label class="field"><span>新等级</span>
               <select v-model="adjustGrade" class="input" required>
@@ -333,7 +344,7 @@
 
       <!-- Cycle modal -->
       <div v-if="cycleModal" class="modal-backdrop" @click.self="cycleModal=false">
-        <div class="modal card">
+        <div class="modal card" style="max-width:560px">
           <h3>{{ cycleForm.id ? '编辑周期' : '新增周期' }}</h3>
           <form class="form-grid" @submit.prevent="saveCycle">
             <label class="field"><span>名称</span><input v-model="cycleForm.name" required /></label>
@@ -345,6 +356,25 @@
             </label>
             <label class="field"><span>开始</span><input v-model="cycleForm.startDate" type="date" required /></label>
             <label class="field"><span>结束</span><input v-model="cycleForm.endDate" type="date" required /></label>
+            <template v-if="!cycleForm.id">
+              <label class="field full"><span>入职截止日期 <span class="muted small">（仅在该日期前入职的员工参评）</span></span>
+                <input v-model="cycleForm.cutoffDate" type="date" />
+              </label>
+              <div class="field full" style="background:var(--bg-soft,#f5f7fa);border-radius:8px;padding:12px 14px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                  <i class="fa-solid fa-users" style="color:var(--primary)"></i>
+                  <strong>参评范围预览</strong>
+                </div>
+                <div style="display:flex;gap:24px;font-size:14px;">
+                  <span>在职员工：<strong>{{ cycleEligible.active }}</strong> 人</span>
+                  <span v-if="cycleEligible.cutoffExcluded">截止日后入职：<strong style="color:var(--warning,#e67e22)">{{ cycleEligible.cutoffExcluded }}</strong> 人</span>
+                  <span>已离职：<strong class="muted">{{ cycleEligible.left }}</strong> 人</span>
+                </div>
+                <div style="margin-top:6px;font-size:13px;color:var(--text-secondary);">
+                  将为 <strong style="color:var(--primary)">{{ cycleEligible.eligible }}</strong> 名员工生成绩效评估
+                </div>
+              </div>
+            </template>
             <label class="field"><span>状态</span>
               <select v-model="cycleForm.status"><option value="open">进行中</option><option value="closed">已关闭</option></select>
             </label>
@@ -447,10 +477,11 @@
       const evalDist = computed(() => {
         const m = {};
         gradeOptions.forEach((g) => { m[g] = 0; });
+        var DONE = { finalized: 1, calibrated: 1, pl_approved: 1, pl_pending: 1 };
         filteredBase.value
-          .filter((r) => ((r.status === 'finalized' || r.status === 'calibrated') && r.finalGrade) || (r.status !== 'rm_pending' && r.rmInitialGrade))
+          .filter((r) => (DONE[r.status] && r.finalGrade) || (r.status !== 'rm_pending' && r.rmInitialGrade))
           .forEach((r) => {
-            const g = String((r.status === 'finalized' || r.status === 'calibrated') ? r.finalGrade : r.rmInitialGrade).trim();
+            const g = String((DONE[r.status] && r.finalGrade) ? r.finalGrade : r.rmInitialGrade).trim();
             if (m[g] != null) m[g]++;
           });
         return m;
@@ -468,24 +499,35 @@
 
       const evalSummary = computed(() => {
         const total = filteredBase.value.length;
+        const plPending = filteredBase.value.filter((r) => r.status === 'pl_pending').length;
         const calibrated = filteredBase.value.filter((r) => r.status === 'calibrated').length;
+        const plApproved = filteredBase.value.filter((r) => r.status === 'pl_approved').length;
         const finalized = filteredBase.value.filter((r) => r.status === 'finalized').length;
-        return `共 ${total} 条评估记录，${calibrated} 条已校准，${finalized} 条已归档`;
+        return `共 ${total} 条，${plPending} 待 HRBP 校准，${calibrated} 已校准，${plApproved} 产品线已审批，${finalized} 已归档`;
       });
+
+      const isPlOwner = computed(() => auth.isProductLineOwner);
 
       const statusCards = computed(() => {
         const base = filteredBase.value;
-        return [
+        const cards = [
           { key: 'rm_pending', label: '待 RM 评估', count: base.filter((r) => r.status === 'rm_pending').length },
+          { key: 'rm_evaluated', label: '已评估待提交', count: base.filter((r) => r.status === 'rm_evaluated').length },
           { key: 'in_approval', label: '审批中', count: base.filter((r) => r.status === 'in_approval').length },
-          { key: 'pl_approved', label: '待校准', count: base.filter((r) => r.status === 'pl_approved').length },
-          { key: 'calibrated', label: '已校准', count: base.filter((r) => r.status === 'calibrated').length },
+          { key: 'pl_pending', label: '待 HRBP 校准', count: base.filter((r) => r.status === 'pl_pending').length },
+          { key: 'calibrated', label: '已校准（待产品线审批）', count: base.filter((r) => r.status === 'calibrated').length },
+          { key: 'pl_approved', label: '产品线已审批', count: base.filter((r) => r.status === 'pl_approved').length },
           { key: 'finalized', label: '已归档', count: base.filter((r) => r.status === 'finalized').length },
         ];
+        const rejectedCount = base.filter((r) => r.status === 'rejected').length;
+        if (rejectedCount > 0) {
+          cards.push({ key: 'rejected', label: '已驳回', count: rejectedCount });
+        }
+        return cards;
       });
 
       const pendingCalibrationCount = computed(() =>
-        (currentCycle.value ? reviewsInScope(currentCycle.value.id) : []).filter((r) => r.status === 'pl_approved').length,
+        (currentCycle.value ? reviewsInScope(currentCycle.value.id) : []).filter((r) => r.status === 'pl_pending').length,
       );
 
       /* ── Archive ── */
@@ -493,22 +535,25 @@
         if (!evalCycleId.value) return false;
         const reviews = data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value);
         if (!reviews.length) return false;
-        return reviews.every((r) => r.status === 'calibrated' || r.status === 'finalized');
+        return reviews.every((r) => r.status === 'pl_approved' || r.status === 'finalized');
       });
       const archiveHint = computed(() => {
         if (!evalCycleId.value) return '';
         const reviews = data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value);
         if (!reviews.length) return '无评估记录';
-        const notReady = reviews.filter((r) => r.status !== 'calibrated' && r.status !== 'finalized');
+        const notReady = reviews.filter((r) => r.status !== 'pl_approved' && r.status !== 'finalized');
         if (!notReady.length) return '';
-        return `还有 ${notReady.length} 条未完成校准`;
+        return `还有 ${notReady.length} 条未完成产品线审批`;
       });
       function doArchive() {
         if (!canArchive.value || !evalCycleId.value) return;
-        const reviews = data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value && r.status === 'calibrated');
-        if (!confirm(`确认归档？共 ${reviews.length} 条已校准记录将被归档。\n归档后绩效等级将锁定，任何人不可修改。`)) return;
-        if (data.archiveCycleReviews(evalCycleId.value)) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `已归档 ${reviews.length} 条绩效记录`, type: 'success' } }));
+        const reviews = data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value && r.status === 'pl_approved');
+        const alreadyFinalized = data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value && r.status === 'finalized').length;
+        const hint = alreadyFinalized ? `（另有 ${alreadyFinalized} 条已归档）` : '';
+        if (!confirm(`确认归档？共 ${reviews.length} 条产品线已审批记录将被归档${hint}。\n归档后绩效等级将锁定，任何人不可修改。`)) return;
+        const archived = data.archiveCycleReviews(evalCycleId.value);
+        if (archived) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `已归档 ${archived} 条绩效记录`, type: 'success' } }));
         }
       }
 
@@ -620,11 +665,11 @@
 
       /* ── Remind: calibration ── */
       const remindCalCount = computed(() =>
-        scopedReviews.value.filter((r) => r.status === 'pl_approved').length,
+        scopedReviews.value.filter((r) => r.status === 'pl_pending').length,
       );
 
       function remindCalibration() {
-        const targets = scopedReviews.value.filter((r) => r.status === 'pl_approved');
+        const targets = scopedReviews.value.filter((r) => r.status === 'pl_pending');
         if (!targets.length) return;
         const deptGroups = new Map();
         targets.forEach((r) => {
@@ -637,33 +682,51 @@
         });
 
         const today = new Date().toISOString().slice(0, 10);
-        const hrbpEid = auth.currentUser?.employeeId;
-        if (!hrbpEid) return;
-        const nid = () => (data.notifications || []).reduce((m, n) => Math.max(m, n.id || 0), 0) + 1;
+        let nidBase = (data.notifications || []).reduce((m, n) => Math.max(m, n.id || 0), 0);
+        const nid = () => ++nidBase;
 
         const lines = [];
         deptGroups.forEach((reviews, dept) => {
           const names = reviews.map((r) => empName(r.employeeId)).join('、');
           lines.push(`【${dept}】${reviews.length} 人: ${names}`);
         });
-        data.notifications.push({
-          id: nid(), employeeId: hrbpEid,
-          title: '校准催促',
-          message: `共 ${targets.length} 条待 HRBP 校准，按部门分布如下：\n${lines.join('\n')}`,
-          read: false, createdAt: today,
-        });
+        const msgBody = `共 ${targets.length} 条待 HRBP 校准，按部门分布如下：\n${lines.join('\n')}`;
+        const hrbpUsers = data.users.filter((u) => u.role === 'hrbp' && u.employeeId);
+        let notified = 0;
+        if (hrbpUsers.length) {
+          hrbpUsers.forEach((u) => {
+            data.notifications.push({
+              id: nid(), employeeId: u.employeeId,
+              title: '校准催促',
+              message: msgBody,
+              read: false, createdAt: today,
+            });
+            notified++;
+          });
+        } else {
+          const hrbpEid = auth.currentUser?.employeeId;
+          if (hrbpEid) {
+            data.notifications.push({
+              id: nid(), employeeId: hrbpEid,
+              title: '校准催促',
+              message: msgBody,
+              read: false, createdAt: today,
+            });
+            notified = 1;
+          }
+        }
         data.persistKeys('notifications');
         window.dispatchEvent(new CustomEvent('tm-toast', {
-          detail: { message: `已生成校准催促通知（${targets.length} 条待校准）`, type: 'success' },
+          detail: { message: `已向 ${notified} 位 HRBP 发送校准催促通知（${targets.length} 条待 HRBP 校准）`, type: 'success' },
         }));
       }
 
       /* ── Batch calibrate ── */
       const batchCalCount = computed(() =>
-        evalRows.value.filter((r) => r.status === 'pl_approved').length,
+        evalRows.value.filter((r) => r.status === 'pl_pending').length,
       );
       function batchCalibrate() {
-        const targets = evalRows.value.filter((r) => r.status === 'pl_approved');
+        const targets = evalRows.value.filter((r) => r.status === 'pl_pending');
         if (!targets.length) return;
         if (!confirm(`确认一键校准 ${targets.length} 条记录？\n将以 RM 建议等级作为最终等级完成校准。`)) return;
         const actor = auth.currentUser?.employeeId;
@@ -677,6 +740,23 @@
         }));
       }
 
+      /* ── PL owner batch approve ── */
+      const plApproveCount = computed(() =>
+        evalRows.value.filter((r) => r.status === 'calibrated').length,
+      );
+      function plOwnerBatchApprove() {
+        if (!evalCycleId.value) return;
+        const targets = evalRows.value.filter((r) => r.status === 'calibrated');
+        if (!targets.length) return;
+        if (!confirm(`确认批量审批 ${targets.length} 条已校准记录？`)) return;
+        const actor = auth.currentUser?.employeeId;
+        const ids = targets.map((r) => r.id);
+        const count = data.plOwnerApproveReviews(evalCycleId.value, actor, ids);
+        window.dispatchEvent(new CustomEvent('tm-toast', {
+          detail: { message: `已审批 ${count} 条记录`, type: count ? 'success' : 'error' },
+        }));
+      }
+
       /* ── Detail / Calibrate / Adjust modals ── */
       const detailRow = ref(null);
       function openDetail(r) { detailRow.value = r; }
@@ -685,6 +765,7 @@
       const calTarget = ref(null);
       const calGrade = ref('B');
       function openCalibrate(r) {
+        if (r.status !== 'pl_pending') return;
         calTarget.value = r;
         calGrade.value = r.rmInitialGrade || 'B';
         calModal.value = true;
@@ -700,9 +781,13 @@
       const adjustModal = ref(false);
       const adjustTarget = ref(null);
       const adjustGrade = ref('B');
+      function canAdjust(r) {
+        return r.status !== 'finalized' && r.status !== 'rm_pending';
+      }
       function openAdjust(r) {
         adjustTarget.value = r;
-        adjustGrade.value = r.finalGrade || 'B';
+        const isDoneStage = r.status === 'pl_pending' || r.status === 'calibrated' || r.status === 'pl_approved';
+        adjustGrade.value = (isDoneStage && r.finalGrade) ? r.finalGrade : (r.rmInitialGrade || 'B');
         adjustModal.value = true;
       }
       function doAdjust() {
@@ -771,11 +856,23 @@
       function doProxyReject() {
         const r = proxyApprTarget.value;
         if (!r) return;
-        if (!confirm('确认驳回至下级？')) return;
         const actorId = auth.currentUser?.employeeId;
-        if (data.rejectPerformanceReview(r.id, actorId, proxyApprNote.value)) {
+        const pendingId = Number(r.pendingApproverId);
+        const teamCount = data.performanceReviews.filter((x) =>
+          x.cycleId === r.cycleId && Number(x.reviewerId) === Number(r.reviewerId)
+          && x.status === 'in_approval' && Number(x.pendingApproverId) === pendingId,
+        ).length;
+        const teamHint = teamCount > 1
+          ? `\n⚠ 该 RM（${empName(r.reviewerId)}）本周期共 ${teamCount} 条评估将一起驳回。`
+          : '';
+        if (!confirm(`确认驳回至下级？${teamHint}`)) return;
+        const result = data.rejectTeamPerformanceReviews(r.id, actorId, proxyApprNote.value);
+        if (result.ok) {
           proxyApprModal.value = false;
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已驳回至下级', type: 'info' } }));
+          const msg = result.count > 1
+            ? `已整批驳回 ${result.rmName} 团队 ${result.count} 条评估`
+            : '已驳回至下级';
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'info' } }));
         }
       }
 
@@ -804,24 +901,44 @@
       }
 
       /* ── Cycle CRUD ── */
+      function cycleReviewCount(cycleId) {
+        return data.performanceReviews.filter((r) => r.cycleId === cycleId).length;
+      }
       const cycleModal = ref(false);
-      const cycleForm = ref({ name: '', cycleType: 'half_year', startDate: '', endDate: '', status: 'open', id: null });
+      const cycleForm = ref({ name: '', cycleType: 'half_year', startDate: '', endDate: '', status: 'open', cutoffDate: '', id: null });
       function openCycleCreate() {
-        cycleForm.value = { name: '', cycleType: 'half_year', startDate: '', endDate: '', status: 'open', id: null };
+        cycleForm.value = { name: '', cycleType: 'half_year', startDate: '', endDate: '', status: 'open', cutoffDate: '', id: null };
         cycleModal.value = true;
       }
       function editCycle(c) {
         cycleForm.value = { ...c, cycleType: c.cycleType === 'year' ? 'year' : 'half_year' };
         cycleModal.value = true;
       }
+
+      const cycleEligible = computed(() => {
+        const cutoff = cycleForm.value.cutoffDate || '';
+        const all = data.employees || [];
+        const left = all.filter((e) => e.status === 'leave').length;
+        const nonLeave = all.filter((e) => e.status !== 'leave');
+        const cutoffExcluded = cutoff
+          ? nonLeave.filter((e) => e.hireDate && String(e.hireDate) > cutoff).length
+          : 0;
+        const eligible = nonLeave.length - cutoffExcluded;
+        return { active: nonLeave.length, left, cutoffExcluded, eligible };
+      });
+
       function saveCycle() {
         const f = cycleForm.value;
         const payload = {
           name: f.name, cycleType: f.cycleType === 'year' ? 'year' : 'half_year',
           startDate: f.startDate, endDate: f.endDate, status: f.status,
         };
-        if (f.id) data.updateCycle(f.id, payload);
-        else data.addCycle(payload);
+        if (f.id) {
+          data.updateCycle(f.id, payload);
+        } else {
+          if (f.cutoffDate) payload.cutoffDate = f.cutoffDate;
+          data.addCycle(payload);
+        }
         cycleModal.value = false;
       }
 
@@ -831,18 +948,19 @@
         empName, empDept, cycleTypeLabel, cycleLabel, statusLabel,
         evalCycleId, evalStatusFilter, rmFilter, rmOptions, levelFilter, levelOptions,
         evalRows, evalDist, evalSummary, evalChartRef, statusCards, pendingCalibrationCount,
-        aSumCount, aSumPct,
+        aSumCount, aSumPct, isPlOwner,
         canArchive, archiveHint, doArchive,
         remindEvalCount, remindEval, remindCalCount, remindCalibration,
         batchCalCount, batchCalibrate,
+        plApproveCount, plOwnerBatchApprove,
         detailRow, openDetail,
         calModal, calTarget, calGrade, openCalibrate, doCalibrate,
-        adjustModal, adjustTarget, adjustGrade, openAdjust, doAdjust,
+        adjustModal, adjustTarget, adjustGrade, openAdjust, doAdjust, canAdjust,
         proxyEvalModal, proxyEvalTarget, proxyEvalForm, openProxyEval, submitProxyEval,
         proxyApprModal, proxyApprTarget, proxyApprGrade, proxyApprNote,
         openProxyApproval, doProxyApprove, doProxyReject,
         commCycleId, commRows, commModal, commTarget, commNotes, openCommModal, doComm,
-        cycleModal, cycleForm, openCycleCreate, editCycle, saveCycle,
+        cycleModal, cycleForm, cycleEligible, cycleReviewCount, openCycleCreate, editCycle, saveCycle,
       };
     },
   };

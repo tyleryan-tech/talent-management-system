@@ -13,27 +13,27 @@
         <div class="login-brand">
           <div class="logo-dot"></div>
           <div>
-            <h1>Talent Management</h1>
-            <p class="muted">Browser demo · Data stored locally<span v-if="serverMode"> · <strong>Server sync</strong> enabled</span></p>
+            <h1>人才管理系统</h1>
+            <p class="muted">浏览器演示 · 数据本地存储<span v-if="serverMode"> · <strong>服务端同步</strong>已开启</span></p>
           </div>
         </div>
         <div class="role-tabs">
           <button type="button" :class="['tab', rolePick === 'hrbp' && 'active']" @click="pickRole('hrbp')">HRBP</button>
-          <button type="button" :class="['tab', rolePick === 'manager' && 'active']" @click="pickRole('manager')">Reporting Manager</button>
+          <button type="button" :class="['tab', rolePick === 'manager' && 'active']" @click="pickRole('manager')">汇报经理</button>
         </div>
         <form class="form-grid" @submit.prevent="onSubmit">
           <label class="field">
-            <span>Email or username</span>
-            <input v-model.trim="username" type="text" autocomplete="username" placeholder="e.g. hrbp@company.com or hrbp" />
+            <span>邮箱或用户名</span>
+            <input v-model.trim="username" type="text" autocomplete="username" placeholder="请输入邮箱或用户名" />
           </label>
           <label class="field">
-            <span>Password</span>
-            <input v-model="password" type="password" autocomplete="current-password" placeholder="Default: 123" />
+            <span>密码</span>
+            <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
           </label>
           <p v-if="error" class="form-error">{{ error }}</p>
-          <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+          <button type="submit" class="btn btn-primary btn-block">登录</button>
         </form>
-        <p class="hint muted">Demo: <strong>hrbp@company.com / 123</strong> (HRBP 超级管理员) · <strong>manager@company.com / 123</strong> (汇报经理) · <strong>intern@company.com / 123</strong> (实习生)</p>
+        
       </div>
     </div>
   `,
@@ -43,8 +43,8 @@
     const auth = useAuthStore();
     const productLine = useProductLineStore();
     const hrScope = useHrScopeStore();
-    const username = ref('tyler.yan@shopee.com');
-    const password = ref('123');
+    const username = ref('');
+    const password = ref('');
     const rolePick = ref('hrbp');
     const error = ref('');
     const serverMode = computed(() => {
@@ -54,8 +54,6 @@
 
     function pickRole(r) {
       rolePick.value = r;
-      username.value = r === 'hrbp' ? 'tyler.yan@shopee.com' : 'manager@company.com';
-      password.value = '123';
       error.value = '';
     }
 
@@ -67,17 +65,16 @@
         return;
       }
       if (rolePick.value === 'hrbp' && auth.currentUser.role !== 'hrbp' && auth.currentUser.role !== 'super_admin') {
-        error.value = 'This account is not HRBP. Switch role or use another account.';
+        error.value = '该账号不是 HRBP 角色，请切换角色或使用其他账号。';
         auth.logout();
         return;
       }
       if (rolePick.value === 'manager' && auth.currentUser.role !== 'manager') {
-        error.value = 'This account is not a reporting manager. Switch role or use another account.';
+        error.value = '该账号不是汇报经理角色，请切换角色或使用其他账号。';
         auth.logout();
         return;
       }
       auth.persistSession();
-      // Load per-user chart preferences
       if (window.TM.chartPrefs) {
         window.TM.chartPrefs.reload(auth.currentUser?.email || auth.currentUser?.username || '');
       }
@@ -98,6 +95,41 @@
           }));
         }
       }
+
+      // Auto-switch to user's allowed / home product line
+      const cu = auth.currentUser;
+      if (cu) {
+        const TM = window.TM;
+        var allowedIds = Array.isArray(cu.allowedLineIds) && cu.allowedLineIds.length ? cu.allowedLineIds : null;
+        var targetLineId = cu.homeLineId;
+
+        // If homeLineId is outside allowedLineIds, override with first allowed line
+        if (allowedIds && targetLineId != null && !allowedIds.includes(targetLineId)) {
+          targetLineId = allowedIds[0];
+        }
+        // If no homeLineId but has allowedLineIds, use first allowed
+        if (targetLineId == null && allowedIds) {
+          targetLineId = allowedIds[0];
+        }
+        // Fallback: scan storage for the employee if homeLineId is missing
+        if (targetLineId == null && cu.employeeId != null) {
+          var curEmps = TM.useDataStore().employees || [];
+          if (!curEmps.some(function (e) { return e.id === cu.employeeId; })) {
+            var found = (productLine.lines || []).find(function (l) {
+              if (l.id === productLine.currentLineId) return false;
+              var lineEmps = TM.loadKeyForLine(l.id, 'employees', null);
+              return Array.isArray(lineEmps) && lineEmps.some(function (e) { return e.id === cu.employeeId; });
+            });
+            if (found) targetLineId = found.id;
+          }
+        }
+        if (targetLineId != null && targetLineId !== productLine.currentLineId
+            && (productLine.lines || []).some(function (l) { return l.id === targetLineId; })) {
+          await productLine.switchToLine(targetLineId);
+          auth.enrichCurrentUserFromEmployee();
+        }
+      }
+
       const redir = route.query.redirect;
       const safeRedirect = typeof redir === 'string'
         && /^\/(?:hrbp|manager|profile)(?:\/|$)/.test(redir);

@@ -138,6 +138,10 @@
       return dataStore.employees.filter(function (e) { return set.has(Number(e.id)); });
     });
 
+    var scopedActiveEmployees = computed(function () {
+      return scopedEmployees.value.filter(function (e) { return e.status !== 'leave'; });
+    });
+
     function employeeInTeam(emp) {
       var set = teamEmpIds.value;
       if (!set) return true;
@@ -148,8 +152,8 @@
       var set = teamEmpIds.value;
       if (!set) return null;
       var ids = new Set();
-      dataStore.employees.forEach(function (e) {
-        if (set.has(Number(e.id))) ids.add(Number(e.departmentId));
+      scopedActiveEmployees.value.forEach(function (e) {
+        ids.add(Number(e.departmentId));
       });
       return ids;
     });
@@ -164,6 +168,7 @@
       isManagerZone: isManagerZone,
       teamEmpIds: teamEmpIds,
       scopedEmployees: scopedEmployees,
+      scopedActiveEmployees: scopedActiveEmployees,
       employeeInTeam: employeeInTeam,
       teamDeptIds: teamDeptIds,
       scopedDepartments: scopedDepartments,

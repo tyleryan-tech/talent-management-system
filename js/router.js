@@ -20,7 +20,7 @@
         { path: 'performance', name: 'hrbp-performance', component: TM.HrbpPerformance, meta: { title: 'Performance' } },
         { path: 'talent', name: 'hrbp-talent', component: TM.HrbpTalent, meta: { title: 'Talent review' } },
         { path: 'recruitment', name: 'hrbp-recruitment', component: TM.HrbpRecruitment, meta: { title: 'Recruiting' } },
-        { path: 'users', name: 'hrbp-users', component: TM.HrbpUserManagement, meta: { title: 'User management', requireSuperAdmin: true } },
+        { path: 'users', redirect: '/admin/users' },
         { path: 'analytics', name: 'hrbp-analytics', redirect: '/hrbp/dashboard' },
       ],
     },
@@ -37,6 +37,16 @@
         { path: 'talent', name: 'mgr-talent', component: TM.HrbpTalent, meta: { title: '人才盘点' } },
         { path: 'performance', name: 'mgr-performance', component: TM.MgrPerformance, meta: { title: 'Performance' } },
         { path: 'attendance', name: 'mgr-attendance', component: TM.HrbpAttendance, meta: { title: '考勤' } },
+      ],
+    },
+    {
+      path: '/admin',
+      component: TM.LayoutView,
+      meta: { zone: 'admin' },
+      children: [
+        { path: '', redirect: '/admin/users' },
+        { path: 'users', name: 'admin-users', component: TM.AdminUserManagement, meta: { title: '用户管理', requireSuperAdmin: true } },
+        { path: 'product-lines', name: 'admin-product-lines', component: TM.AdminProductLines, meta: { title: '产品线管理', requireSuperAdmin: true } },
       ],
     },
     {
@@ -77,6 +87,10 @@
     }
     if (to.path.startsWith('/manager') && !auth.isManager) {
       next('/hrbp/dashboard');
+      return;
+    }
+    if (to.path.startsWith('/admin') && !auth.canManageUsers) {
+      next(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
       return;
     }
     if (to.meta.requireSuperAdmin && !auth.canManageUsers) {

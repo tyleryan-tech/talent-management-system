@@ -28,7 +28,7 @@ const GRADES = window.TM.PERF_GRADE_OPTIONS || ['A+', 'A', 'A-', 'B+', 'B', 'C',
     const c3 = ref(null);
 
     const me = computed(() => auth.currentUser?.employeeId);
-    const subsIds = computed(() => data.employees.filter((e) => e.managerId === me.value).map((e) => e.id));
+    const subsIds = computed(() => data.employees.filter((e) => e.managerId === me.value && e.status !== 'leave').map((e) => e.id));
 
     let ch1 = null, ch2 = null, ch3 = null;
 

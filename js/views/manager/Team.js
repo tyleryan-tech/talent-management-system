@@ -79,7 +79,7 @@ function buildReportTree(data, rootId) {
     let echartsLib;
 
     const me = computed(() => auth.currentUser?.employeeId);
-    const direct = computed(() => data.employees.filter((e) => e.managerId === me.value));
+    const direct = computed(() => data.employees.filter((e) => e.managerId === me.value && e.status !== 'leave'));
 
     function posName(id) {
       return data.positions.find((p) => p.id === id)?.name || '-';

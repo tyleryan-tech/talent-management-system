@@ -6,11 +6,11 @@ function buildDemoWorkspace() {
   const JOB_LEVELS = ['E', 'SE', 'EE', 'SEE', 'AM', 'M', 'PE', 'SM'];
 
   const departments = [
-    { id: 1, name: 'Engineering', parentId: null, managerId: 1005 },
-    { id: 2, name: 'Product', parentId: null, managerId: 1011 },
-    { id: 3, name: 'Marketing', parentId: null, managerId: 1015 },
-    { id: 4, name: 'Sales', parentId: null, managerId: 1018 },
-    { id: 5, name: 'HR', parentId: null, managerId: 1001 },
+    { id: 1, name: '研发部', parentId: null, managerId: 1005 },
+    { id: 2, name: '产品部', parentId: null, managerId: 1011 },
+    { id: 3, name: '市场部', parentId: null, managerId: 1015 },
+    { id: 4, name: '销售部', parentId: null, managerId: 1018 },
+    { id: 5, name: '人力资源部', parentId: null, managerId: 1001 },
   ];
 
   let nextPosId = 101;
@@ -55,7 +55,10 @@ function buildDemoWorkspace() {
 
   for (let i = 0; i < EMP_TOTAL; i++) {
     const id = EMP_START_ID + i;
-    const name = `Employee ${id}`;
+    const CORE_NAMES = ['张文华','周海涛','吴雨桐','林晓东','陈志伟','杨思琪','赵鹏飞','孙婉清','黄志强','马天宇','李明远','韩雪梅','钱浩宇','郑雅琴','王雅琴','谢子涵','宋佳怡','刘建国','高瑞祥','邓文杰'];
+    const SURNAMES = ['张','王','李','赵','陈','刘','杨','黄','周','吴','徐','孙','马','胡','朱','郭','何','林','罗','高','郑','梁','谢','宋','唐','韩','冯','董','程','曹','袁','邓','彭','苏','蒋','蔡','贾','丁','魏','薛','叶','阎','余','潘','杜','戴','夏','钟','汪','田'];
+    const GIVEN_NAMES = ['明远','晓峰','伟华','婷婷','建国','丽华','志强','海燕','大伟','思远','秀英','文博','小明','文静','子轩','雅琪','浩然','天宇','雨薇','晨曦','博文','诗涵','宇飞','佳怡','嘉诚','雪莹','思源','俊杰','梦琪','泽宇','欣怡','浩宇','美琪','文杰','雨辰','子涵','瑞祥','雅婷','凯文','明辉','静怡','志远','慧敏','鹏飞','雨萱','伟杰','嘉怡','文涛','思彤','家豪','芷若','皓轩','语嫣','子墨','若曦','逸飞','紫萱','昊天','雨桐','书瑶','睿智','诗琪','浩轩','沐阳','芸熙','子豪','晨露','心怡','弘毅','雅文','靖宇','婉仪','清扬','星辰','悦然','景行','安然','知行','明德','致远'];
+    const name = i < CORE_NAMES.length ? CORE_NAMES[i] : SURNAMES[(i * 7 + 3) % 50] + GIVEN_NAMES[(i * 13 + 5) % 80];
     const gender = i % 2 === 0 ? '男' : '女';
     const birthY = 1978 + (i % 28);
     const birthday = padYmd(birthY, 1 + (i % 12), 1 + (i % 28));
@@ -111,7 +114,7 @@ function buildDemoWorkspace() {
       email: 'hrbp@company.com',
       password: '123',
       role: 'hrbp',
-      realName: 'HRBP Admin',
+      realName: '张文华',
       employeeId: null,
     },
     {
@@ -120,7 +123,7 @@ function buildDemoWorkspace() {
       email: 'manager@company.com',
       password: '123',
       role: 'manager',
-      realName: 'Reporting Manager',
+      realName: '陈志伟',
       employeeId: 1005,
     },
     {
@@ -130,7 +133,7 @@ function buildDemoWorkspace() {
       password: '123',
       role: 'hrbp',
       superAdmin: true,
-      realName: 'Super Admin',
+      realName: '超级管理员',
       employeeId: null,
     },
   ];

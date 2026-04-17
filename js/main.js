@@ -58,6 +58,20 @@
   const useServer = ss && ss.isEnabled && ss.isEnabled();
 
   productLineStore.hydrate();
+  if (!productLineStore.lines.some((l) => l.id === 3)) {
+    productLineStore.lines.push({ id: 3, name: '多层级测试线', createdAt: new Date().toISOString().slice(0, 10) });
+    productLineStore.persistRegistry();
+  }
+
+  function _clearLineScopedData(lid) {
+    var prefix = 'tm_L' + lid + '_';
+    var toRemove = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(prefix) === 0) toRemove.push(k);
+    }
+    toRemove.forEach(function (k) { localStorage.removeItem(k); });
+  }
   authStore.restoreSession();
   // Set Sentry user context
   if (TM.observability && authStore.isLoggedIn && authStore.currentUser) {
@@ -69,7 +83,9 @@
   }
 
   let dataLoadedFromServer = false;
+  const _setLoading = (v) => window.dispatchEvent(new CustomEvent('tm-loading', { detail: { loading: v } }));
   if (useServer && ss.getToken()) {
+    _setLoading(true);
     await ss.verifySession(authStore);
     if (authStore.isLoggedIn) {
       try {
@@ -79,29 +95,35 @@
         ss.connectWs(productLineStore.currentLineId);
         dataLoadedFromServer = true;
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.warn('[serverSync] pull failed, falling back to local cache:', e);
       }
     }
+    _setLoading(false);
   }
 
   const lineId = productLineStore.currentLineId;
   if (!dataLoadedFromServer) {
     try {
-      if (lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
+      if (lineId === 3 && typeof TM.seedMultiLevelOrg === 'function'
+          && TM.loadKeyForLine(3, '_multiLevelSeeded', 0) < 5) {
+        _clearLineScopedData(3);
+        TM.seedMultiLevelOrg(3);
+        TM.saveKeyForLine(3, '_multiLevelSeeded', 5);
+        window.__TM_FIRST_SEED__ = true;
+      } else if (lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
         TM.seedAllData(lineId);
         window.__TM_FIRST_SEED__ = true;
       } else if (lineId != null) {
         const sv = TM.loadKeyForLine(lineId, '_seedVersion', 0);
-        if (sv < 13) {
-          if (typeof TM.seedPipelineDemo === 'function') TM.seedPipelineDemo(lineId);
-        }
-        if (sv < 16) {
-          if (typeof TM.seedAttendanceDemo === 'function') TM.seedAttendanceDemo(lineId);
-        }
-        if (sv < 17) {
-          if (typeof TM.seedPerformanceDemo === 'function') TM.seedPerformanceDemo(lineId);
-          TM.saveKeyForLine(lineId, '_seedVersion', 17);
+        if (sv < 20) {
+          _clearLineScopedData(lineId);
+          if (lineId === 3 && typeof TM.seedMultiLevelOrg === 'function') {
+            TM.seedMultiLevelOrg(3);
+            TM.saveKeyForLine(3, '_multiLevelSeeded', 5);
+          } else {
+            TM.seedAllData(lineId);
+          }
+          TM.saveKeyForLine(lineId, '_seedVersion', 20);
         }
       }
     } catch (seedErr) {
@@ -123,8 +145,20 @@
   if (window.__TM_FIRST_SEED__) {
     requestAnimationFrame(() => {
       window.dispatchEvent(new CustomEvent('tm-toast', {
-        detail: { message: 'Demo data has been generated and saved locally. Explore any module.', type: 'success' },
+        detail: { message: '演示数据已生成并保存到本地，可以开始使用各模块。', type: 'success' },
       }));
     });
   }
+
+  // Multi-tab awareness: detect when another tab writes to localStorage
+  let _storageToastShown = false;
+  window.addEventListener('storage', (e) => {
+    if (!e.key || !e.key.startsWith('tm_')) return;
+    if (_storageToastShown) return;
+    _storageToastShown = true;
+    window.dispatchEvent(new CustomEvent('tm-toast', {
+      detail: { message: '其他标签页已更新数据，建议刷新页面以获取最新内容', type: 'warning' },
+    }));
+    setTimeout(() => { _storageToastShown = false; }, 30000);
+  });
 })();

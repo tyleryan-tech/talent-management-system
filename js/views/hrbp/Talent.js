@@ -190,7 +190,7 @@ const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', abo
 
                 <td><span class="tag perf-grade-tag">{{ row.performance }}</span></td>
                 <td>
-                  <span class="perf-grade-inline" v-html="row.perfHistory || '—'"></span>
+                  <span class="perf-grade-inline"><template v-if="row.perfHistoryList && row.perfHistoryList.length"><template v-for="(pg, gi) in row.perfHistoryList"><span v-if="gi">, </span><b v-if="pg.annual" class="perf-annual">{{ pg.grade }}</b><span v-else class="perf-half">{{ pg.grade }}</span></template></template><template v-else>—</template></span>
                 </td>
                 <td>
                   <select v-if="auth.hasPermission('talent.potential')" class="input nine-pot-select table-inline"
@@ -349,7 +349,7 @@ const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', abo
       return data.positions.filter((p) => set.has(Number(p.departmentId)));
     });
 
-    const employeesForSucc = computed(() => data.employees.filter((e) => employeeInScope(e)));
+    const employeesForSucc = computed(() => data.employees.filter((e) => e.status !== 'leave' && employeeInScope(e)));
 
     const employeesForSuccModal = computed(() => {
       const base = employeesForSucc.value;
@@ -390,20 +390,31 @@ const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', abo
       return data.talentMatrix.find((x) => Number(x.employeeId) === id);
     }
 
-    function cell(perf, pot) {
-      return data.employees.filter((e) => {
-        if (e.status === 'leave') return false;
-        if (!employeeInScope(e)) return false;
+    const nineBoxBuckets = computed(() => {
+      const buckets = new Map();
+      data.employees.forEach((e) => {
+        if (e.status === 'leave') return;
+        if (!employeeInScope(e)) return;
         const m = matrixRow(e.id);
-        if (!m) return false;
+        if (!m) return;
         const rating = computedPerfRating(e.id);
-        return rating === perf && m.potential === pot;
+        const key = rating + '|' + (m.potential || '');
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(e);
       });
+      return buckets;
+    });
+    function cell(perf, pot) {
+      return nineBoxBuckets.value.get(perf + '|' + pot) || [];
     }
 
     function perfHistoryHtml(employeeId) {
       const list = data._reviewsByEmp.get(Number(employeeId)) || [];
       return window.TM.allGradesForDisplay(list, data.performanceCycles) || '—';
+    }
+    function perfHistoryList(employeeId) {
+      const list = data._reviewsByEmp.get(Number(employeeId)) || [];
+      return window.TM.allGradesStructured(list, data.performanceCycles);
     }
 
     function computedPerfRating(employeeId) {
@@ -443,21 +454,22 @@ const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', abo
 
     /* ── Flight risk heuristic ── */
     function computeFlightRisk(e, m) {
+      const FR = (window.TM.THRESHOLDS && window.TM.THRESHOLDS.FLIGHT_RISK) || { TENURE_MIN_YEARS: 3, TENURE_MAX_YEARS: 5, RANK_STALE_YEARS: 2, HIGH_SCORE: 2, MEDIUM_SCORE: 1 };
       let score = 0;
       const tenure = e.hireDate ? tenureFromDate(e.hireDate) : '—';
       if (tenure !== '—') {
         const match = tenure.match(/(\d+)y/);
         const years = match ? Number(match[1]) : 0;
-        if (years >= 3 && years <= 5) score += 1;
+        if (years >= FR.TENURE_MIN_YEARS && years <= FR.TENURE_MAX_YEARS) score += 1;
       }
       if (e.salaryBand === 'below_min' || e.salaryBand === 'p25') score += 1;
       const rankTenure = e.rankStartDate || e.levelStartDate;
       if (rankTenure) {
         const rm = tenureFromDate(rankTenure).match(/(\d+)y/);
-        if (rm && Number(rm[1]) >= 2) score += 1;
+        if (rm && Number(rm[1]) >= FR.RANK_STALE_YEARS) score += 1;
       }
-      if (score >= 2) return 'High';
-      if (score >= 1) return 'Medium';
+      if (score >= FR.HIGH_SCORE) return 'High';
+      if (score >= FR.MEDIUM_SCORE) return 'Medium';
       return 'Low';
     }
 
@@ -498,6 +510,7 @@ const PAY_LABELS = { below_min: '< Min', p25: 'P25', p50: 'P50', p75: 'P75', abo
             rank: pos?.level || e.rank || '',
             performance: rating,
             perfHistory: perfHistoryHtml(m.employeeId),
+            perfHistoryList: perfHistoryList(m.employeeId),
             potential: m.potential,
             payPosition: pay,
             payClass: e.salaryBand === 'below_min' ? 'tag tag-risk-high' : e.salaryBand === 'above_max' ? 'tag tag-risk-low' : '',

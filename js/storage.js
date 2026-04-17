@@ -73,7 +73,7 @@
     }
     const today = new Date().toISOString().slice(0, 10);
     w.TM.saveKey(REGISTRY_KEY, {
-      lines: [{ id: lineId, name: 'Default product line', createdAt: today }],
+      lines: [{ id: lineId, name: '默认产品线', createdAt: today }],
       currentLineId: lineId,
     });
     return true;

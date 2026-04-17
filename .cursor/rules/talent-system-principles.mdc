@@ -46,3 +46,87 @@ alwaysApply: true
   - **Roster 花名册**（`Roster.js` → `ROSTER_SCHEMA` + `importExcel` / `appendImportExcel`）
   - **Attendance 考勤**（`Attendance.js` → 已有智能时间序列列名检测，遵循相同自动识别原则）
 - **新增上传入口**：任何新模块若需文件导入，必须使用 `TM.fieldMapper.match(schema, headers)` + `FieldMapDialog` 组件，不得硬编码列位置。
+
+## 6. 持久化与数据流安全（防止静默数据丢失/污染）
+
+本系统的数据按产品线隔离存储（`tm_L{lineId}_{key}`），users 为全局存储（`tm_global_users`）。以下规则强制执行，违反即为 P0 级缺陷。
+
+### 6.1 上下文切换前必须同步落盘
+
+- 任何会改变"写入目标"的操作（切换产品线、切换周期、切换角色等），**必须在改变上下文标识之前同步写入所有脏数据**。
+- **禁止**在切换路径中使用防抖（`setTimeout`/`debounce`）写入——防抖回调触发时上下文可能已经变了，数据会写入错误位置。
+- 正确模式：`flushSync()` → 改 `contextId` → `hydrate()`。
+
+### 6.2 全局数据与作用域数据严格分离
+
+- **全局数据**（`users`、产品线注册表等跨产品线共享的数据）的关联字段（如 `user.employeeId`）**不得被作用域操作修改**。
+  - 例：当前产品线没有某员工，不代表该用户的 `employeeId` 应被清空——其他产品线可能有该员工。
+- **作用域数据**（`employees`、`departments` 等按产品线隔离的数据）的同步/清理逻辑不得触及全局数据的结构。
+- 新增任何 `persist`/`save`/`flush` 调用时，必须确认 `currentLineId` 是否是预期的写入目标。
+
+### 6.3 加载时防御性校验
+
+- 从存储加载数组型数据时，**必须按主键去重**（`employees` 按 `id`、`users` 按 `id`/`email` 等）。检测到重复时写 `console.warn` 日志并自动修复存储。
+- **不得假设存储中的数据是干净的**——存储可能被其他 tab、旧版本、或历史 bug 污染过。加载后应做基本完整性检查（主键唯一、必填字段非空、外键引用有效等）。
+
+### 6.4 hydrate/init/switch 生命周期纪律
+
+- `hydrate()` 开始时必须 **清空所有定时器和脏标记**（`_persistTimer`、`_dirtyKeys`），确保新数据加载不被旧上下文的残留状态污染。
+- `hydrate()` 结束时的 `persistAllSync()` 只应写入 hydrate 过程中新产生的脏键，不应包含上一个上下文遗留的脏键。
+- 修改任何生命周期方法时，必须画出完整的时序：`markDirty → persist → contextSwitch → hydrate → persist`，确认每一步的 `lineId` 和 `dirtyKeys` 状态。
+
+### 6.5 变更自检清单
+
+修改 store 的 action 或持久化逻辑时，必须逐项确认：
+
+1. **写入目标**：这次写入的 scope/lineId 是哪个？有没有可能在异步间隙被其他操作改变？
+2. **脏标记**：`_markDirty` 标记的键是否准确？有没有多标（导致无关数据被覆写）或少标（导致修改丢失）？
+3. **全局 vs 作用域**：这次操作涉及的数据是全局的还是作用域的？有没有跨界修改？
+4. **并发安全**：如果用户在写入完成前做了其他操作（切换页面、切换产品线、关闭浏览器），数据会丢失吗？
+5. **幂等性**：如果这个操作被执行两次（页面刷新、重复点击），数据会重复吗？
+
+## 7. 测试纪律（防止回归、确保交付质量）
+
+本项目使用浏览器端测试运行器（`tests/index.html`），分三层覆盖：**Store 逻辑** → **Computed 视图** → **Smoke 端到端**。以下规则强制执行。
+
+### 7.1 何时必须运行测试
+
+- **每次修改 store action、computed 属性、或持久化逻辑后**，必须在 `tests/index.html` 中运行全部测试并确认通过。
+- **提交代码前**，测试必须全部通过。
+
+### 7.2 新功能必须同步添加测试
+
+- 新增 store action → 至少一个"正向"用例 + 一个"边界/异常"用例。
+- 新增 computed / 视图过滤逻辑 → 在 `test-view-computed.js` 中断言输出。
+- 新增跨模块交互 → 在 `test-smoke.js` 中添加端到端场景。
+
+### 7.3 修复 bug 必须添加回归测试
+
+- 每个已修复的 bug 必须有对应的测试用例，命名/注释中注明对应的问题描述。
+- 回归测试应放在最匹配的测试文件中（数据一致性 → `test-data-consistency.js`，视图层 → `test-view-computed.js`，等）。
+
+### 7.4 高风险操作的必测清单
+
+以下操作类型历史上反复出问题，修改时**必须**有对应测试覆盖：
+
+| 操作类型 | 必测内容 |
+|----------|---------|
+| 产品线切换 | 切换前后数据隔离、脏键清理、hydrate 一致性 |
+| 员工状态变更 | leave 排除、活跃计数、九宫格同步 |
+| 绩效周期创建 | 参评人数 = 活跃员工、cutoffDate 过滤、review 字段完整 |
+| 绩效审批/驳回 | 整批一致性、状态流转正确、权限校验 |
+| 数据导入 | 去重、字段映射、关联数据同步 |
+
+### 7.5 测试文件组织
+
+| 文件 | 覆盖范围 |
+|------|---------|
+| `test-employee-crud.js` | 员工增删改 |
+| `test-organization.js` | 部门/岗位管理 |
+| `test-performance-workflow.js` | 绩效基础操作 |
+| `test-data-sync.js` | 跨模块数据同步 |
+| `test-data-consistency.js` | 数据一致性回归 |
+| `test-product-line-switch.js` | 产品线切换隔离 |
+| `test-team-reject.js` | 绩效整批驳回 |
+| `test-view-computed.js` | 视图层 computed 断言 |
+| `test-smoke.js` | 端到端业务流程 |

@@ -63,6 +63,14 @@
     if (!threw) throw new Error(msg || 'Expected function to throw');
   };
 
+  class SkipError {
+    constructor(reason) { this.reason = reason || 'precondition not met'; }
+  }
+
+  function skip(reason) {
+    throw new SkipError(reason);
+  }
+
   async function runAll(options) {
     const log = options?.log || console.log.bind(console);
     totalPassed = 0;
@@ -78,14 +86,20 @@
       for (const test of ctx.tests) {
         for (const bfn of ctx._beforeEach) await bfn();
         try {
-          await test.fn(assert);
+          await test.fn(assert, skip);
           totalPassed++;
           log(`  ✅ ${test.name}`);
           results.push({ suite: suite.name, test: test.name, status: 'passed' });
         } catch (err) {
-          totalFailed++;
-          log(`  ❌ ${test.name}: ${err.message}`);
-          results.push({ suite: suite.name, test: test.name, status: 'failed', error: err.message });
+          if (err instanceof SkipError) {
+            totalSkipped++;
+            log(`  ⏭️ ${test.name} [SKIP: ${err.reason}]`);
+            results.push({ suite: suite.name, test: test.name, status: 'skipped', reason: err.reason });
+          } else {
+            totalFailed++;
+            log(`  ❌ ${test.name}: ${err.message}`);
+            results.push({ suite: suite.name, test: test.name, status: 'failed', error: err.message });
+          }
         }
         for (const afn of ctx._afterEach) await afn();
       }
@@ -98,6 +112,7 @@
   w.TM._testRunner = {
     describe,
     assert,
+    skip,
     runAll,
     suites,
   };

@@ -235,6 +235,10 @@ function perfStatusEn(s) {
       <div class="card pad roster-toolbar-card">
         <div class="toolbar roster-toolbar-actions">
           <input v-model.trim="q" type="search" class="input search" placeholder="Search name, email, mobile…" />
+          <button type="button" :class="['btn btn-sm', showArchived ? 'btn-warning' : 'btn-ghost']" @click="showArchived = !showArchived" :title="showArchived ? '当前显示全部（含已离职），点击隐藏' : '点击查看已离职员工档案'">
+            <i :class="['fa-solid', showArchived ? 'fa-eye' : 'fa-archive']"></i>
+            {{ showArchived ? '隐藏离职' : '离职存档 (' + archivedCount + ')' }}
+          </button>
           <button v-if="hasActiveFilters" type="button" class="btn btn-ghost btn-sm" @click="clearRosterFilters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
           <button v-if="auth.hasPermission('roster.add')" type="button" class="btn btn-primary" @click="openCreate">Add employee</button>
           <button v-if="auth.isHrbp" type="button" class="btn btn-danger" :disabled="!selectedIds.length" @click="batchDeleteEmployees">Delete selected</button>
@@ -372,7 +376,7 @@ function perfStatusEn(s) {
                   <button type="button" class="linklike" @click="openDetail(e)">{{ e.name }}</button>
                 </template>
                 <template v-else-if="col.key === 'performance'">
-                  <span class="perf-grade-inline" v-html="perfGradesHtml(e.id)"></span>
+                  <span class="perf-grade-inline"><template v-for="(pg, gi) in perfGradesList(e.id)"><span v-if="gi">, </span><b v-if="pg.annual" class="perf-annual">{{ pg.grade }}</b><span v-else class="perf-half">{{ pg.grade }}</span></template></span>
                 </template>
                 <template v-else-if="col.key === 'avgHours6m'">
                   <span :class="rosterHoursClass(e.id)">{{ rosterTextCell(col.key, e) }}</span>
@@ -473,7 +477,7 @@ function perfStatusEn(s) {
           <h4 class="subsection-title">绩效记录</h4>
           <div v-if="detailReviews.length" style="margin-bottom:8px">
             <span class="muted small">历次绩效: </span>
-            <span class="perf-grade-inline" v-html="perfGradesHtml(detail.id)" style="font-size:0.95rem"></span>
+            <span class="perf-grade-inline" style="font-size:0.95rem"><template v-for="(pg, gi) in perfGradesList(detail.id)"><span v-if="gi">, </span><b v-if="pg.annual" class="perf-annual">{{ pg.grade }}</b><span v-else class="perf-half">{{ pg.grade }}</span></template></span>
           </div>
           <p v-if="!detailReviews.length" class="muted small">暂无绩效记录</p>
           <div v-else class="roster-perf-wrap">
@@ -689,8 +693,15 @@ function perfStatusEn(s) {
       return null;
     }
 
+    const showArchived = ref(false);
+    const archivedCount = computed(() =>
+      zs.scopedEmployees.value.filter((e) => e.status === 'leave').length,
+    );
+
     const filtered = computed(() => {
-      let list = [...zs.scopedEmployees.value];
+      let list = showArchived.value
+        ? [...zs.scopedEmployees.value]
+        : [...zs.scopedActiveEmployees.value];
       Object.entries(colFilters).forEach(([key, val]) => {
         if (val === '' || val == null) return;
         const ft = colFilterType(key);
@@ -830,6 +841,9 @@ function perfStatusEn(s) {
     function perfGradesHtml(eid) {
       const html = window.TM.allGradesForDisplay(reviewsForEmployee(eid), data.performanceCycles);
       return html || '—';
+    }
+    function perfGradesList(eid) {
+      return window.TM.allGradesStructured(reviewsForEmployee(eid), data.performanceCycles);
     }
 
     const detailReviews = computed(() => {
@@ -1171,7 +1185,8 @@ function perfStatusEn(s) {
       try {
         const XLSX = ensureXLSX();
         const cols = exportColumnsResolved();
-        const rows = [...zs.scopedEmployees.value].sort((a, b) => a.id - b.id).map((e) => {
+        const src = showArchived.value ? zs.scopedEmployees.value : zs.scopedActiveEmployees.value;
+        const rows = [...src].sort((a, b) => a.id - b.id).map((e) => {
           const row = {};
           cols.forEach((col) => {
             row[col.labelResolved] = exportCellValue(col.key, e);
@@ -1198,7 +1213,7 @@ function perfStatusEn(s) {
         birthday: '1990-01-01',
         teamPath: '(optional)',
         teamId: d0?.id ?? 1,
-        team: d0?.name ?? 'Engineering',
+        team: d0?.name ?? '技术部',
         jobFunctionSlotId: p0?.id ?? 101,
         jobFunction: p0?.name ?? 'Frontend',
         rank: 'EE',
@@ -1295,9 +1310,20 @@ function perfStatusEn(s) {
         const deptId = resolveDeptId(row, map);
         const positionId = resolvePosId(row, deptId, map);
         const mid = importCell(row, 'reportingManager', map);
-        const managerId = (mid === '' || mid == null || mid === undefined || String(mid).trim() === '')
-          ? null
-          : Number(mid);
+        let managerId = null;
+        if (mid !== '' && mid != null && mid !== undefined && String(mid).trim() !== '') {
+          const midNum = Number(mid);
+          if (!Number.isNaN(midNum) && midNum > 0) {
+            managerId = midNum;
+          } else {
+            const midStr = String(mid).trim().toLowerCase();
+            const match = data.employees.find((e) =>
+              String(e.name || '').trim().toLowerCase() === midStr
+              || String(e.id) === midStr,
+            );
+            if (match) managerId = match.id;
+          }
+        }
         const pot = parsePotentialCell(importCell(row, 'potential', map));
         if (pot) matrixPatches.push({ id, pot });
         const hd = cellToDateString(importCell(row, 'hireDate', map)) || '2020-01-01';
@@ -1369,6 +1395,7 @@ function perfStatusEn(s) {
           realName: emp.name,
           role: 'manager',
           employeeId: eid,
+          homeLineId: window.TM.useProductLineStore().currentLineId,
           rmStatus: 'pending_approval',
           rmNominationSource: '花名册导入识别',
           managerPermissions: { modules: window.TM.MGR_MODULES.slice(), ops: window.TM.RM_ALL_OPS_ON() },
@@ -1461,11 +1488,11 @@ function perfStatusEn(s) {
 
     return {
       auth,
-      data, q, colFilters,
+      data, q, colFilters, showArchived, archivedCount,
       selectedIds, selectedSet, allFilteredSelected, toggleSelectRow, toggleSelectAllFiltered, batchDeleteEmployees,
       levelFilterOptions, filtered, statusMap, clearRosterFilters,
       deptName, posName, posLevel, mgrName, tenureHuman, companyTenureLabel, levelTenureLabel, potentialDisplay,
-      teamPathForDept, displayAge, orgRoleDisplay, salaryBandDisplay, perfSummaryText, perfGradesHtml, perfStatusEn, reviewCycleLabel, reviewCycleType, rosterReviewNote,
+      teamPathForDept, displayAge, orgRoleDisplay, salaryBandDisplay, perfSummaryText, perfGradesHtml, perfGradesList, perfStatusEn, reviewCycleLabel, reviewCycleType, rosterReviewNote,
       modal, modalMode, form, positionsInDept,
       openCreate, openEdit, saveEmployee, doLeave, openDetail, detail, detailRows, detailReviews,
       exportExcel, importExcel, appendImportExcel, downloadExcelTemplate,

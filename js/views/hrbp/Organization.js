@@ -28,7 +28,7 @@
       .replace(/"/g, '&quot;');
   }
 
-  const STATUS_LABEL_MAP = { active: 'Active', probation: 'Probation', leave: 'Leaving' };
+  const STATUS_LABEL_MAP = { active: '在职', probation: '试用期', leave: '离职' };
 
   /** 某部门下的岗位编制节点（与人名分行；空岗可标待招） */
   function buildPositionNodes(deptId, data, ec) {
@@ -250,23 +250,27 @@
   template: `
     <div class="page-stack">
       <div class="toolbar card pad wrap">
-        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-primary" @click="openDept('create')">Add department</button>
-        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPos('create')">Add Target HC</button>
+        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-primary" @click="openDept('create')">添加部门</button>
+        <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPos('create')">添加目标HC</button>
         <span class="muted">拖拽部门行可调整层级关系。HRBP / 产品线负责人操作自动生效；汇报经理操作需审批。</span>
       </div>
       <section class="card pad">
-        <h3 class="section-title">Organization change approval</h3>
-        <p class="muted small">增删部门、调整汇报关系、增删改 Target HC 均需逐级审批，<strong>产品线负责人</strong>为最终审批人。</p>
-        <p class="muted small">标记<strong>空编招聘</strong>及优先级属于招聘运营操作，<strong>不需要</strong>组织架构审批（与 Recruitment 模块同规则）。</p>
+        <h3 class="section-title">组织变更审批</h3>
+        <p class="muted small">增删部门、调整汇报关系、增删改目标HC均需逐级审批，<strong>产品线负责人</strong>为最终审批人。</p>
+        <p class="muted small">标记<strong>空编招聘</strong>及优先级属于招聘运营操作，<strong>不需要</strong>组织架构审批（与招聘模块同规则）。</p>
         <label class="field inline" style="margin-bottom:12px">
-          <span>Product line owner (final approver)</span>
-          <select v-model.number="orgOwnerId" class="input" :disabled="!auth.isHrbp">
-            <option v-for="e in data.employees" :key="'own-'+e.id" :value="e.id">{{ e.name }} ({{ e.id }})</option>
+          <span>产品线负责人（最终审批人）</span>
+          <select :value="orgOwnerId" @change="orgOwnerId = $event.target.value === '' ? null : Number($event.target.value)" class="input" :disabled="!auth.isHrbp">
+            <option value="">— 未设置 —</option>
+            <option v-for="e in data.employees.filter(e => e.status !== 'leave')" :key="'own-'+e.id" :value="e.id">{{ e.name }} ({{ e.id }})</option>
           </select>
+          <span v-if="!orgOwnerId" class="muted small" style="color:var(--danger);margin-left:8px">
+            <i class="fa-solid fa-triangle-exclamation"></i> 未设置产品线负责人，组织变更审批无法流转到最终审批人
+          </span>
         </label>
         <table v-if="orgActiveRequests.length" class="data-table compact">
           <thead>
-            <tr><th>Title</th><th>Type</th><th>Pending approver</th><th>Chain</th><th>Submitted</th><th></th></tr>
+            <tr><th>标题</th><th>类型</th><th>待审批人</th><th>审批链</th><th>提交时间</th><th>操作</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in orgActiveRequests" :key="r.id">
@@ -277,8 +281,8 @@
               <td>{{ r.submittedAt }}</td>
               <td class="row-actions">
                 <template v-if="canApproveAsMe(r) && auth.hasPermission('org.approveChange')">
-                  <button type="button" class="btn-link" @click="approveOrgReq(r)">Approve</button>
-                  <button type="button" class="btn-link danger" @click="rejectOrgReq(r)">Reject</button>
+                  <button type="button" class="btn-link" @click="approveOrgReq(r)">审批通过</button>
+                  <button type="button" class="btn-link danger" @click="rejectOrgReq(r)">驳回</button>
                 </template>
               </td>
             </tr>
@@ -295,7 +299,7 @@
         <template v-if="showOrgHistory">
           <table v-if="orgHistoryRequests.length" class="data-table compact" style="margin-top:8px">
             <thead>
-              <tr><th>Title</th><th>Type</th><th>Status</th><th>Chain</th><th>Submitted</th></tr>
+              <tr><th>标题</th><th>类型</th><th>状态</th><th>审批链</th><th>提交时间</th></tr>
             </thead>
             <tbody>
               <tr v-for="r in orgHistoryRequests" :key="r.id">
@@ -311,7 +315,7 @@
         </template>
       </section>
       <div class="card pad">
-        <h3 class="section-title">Department list (drag to adjust hierarchy)</h3>
+        <h3 class="section-title">部门列表（拖拽调整层级）</h3>
         <div
           class="dept-drop-root"
           :class="{ 'drag-over': rootDropOver }"
@@ -319,10 +323,10 @@
           @dragleave="onRootDragLeave($event)"
           @drop.prevent="onDropAsRoot"
         >
-          <i class="fa-solid fa-layer-group"></i> Drop here: set as top-level (no parent)
+          <i class="fa-solid fa-layer-group"></i> 拖放到此处：设为顶级部门（无上级部门）
         </div>
         <table class="data-table compact dept-drag-table">
-          <thead><tr><th class="col-drag"></th><th>Department</th><th>Parent</th><th>Head</th><th>HC Plan</th><th>Target HC</th><th>Current HC</th><th>Fulfillment</th><th></th></tr></thead>
+          <thead><tr><th class="col-drag"></th><th>部门</th><th>上级部门</th><th>负责人</th><th>HC 计划</th><th>目标HC</th><th>实际HC</th><th>编制达成</th><th>操作</th></tr></thead>
           <tbody>
             <tr
               v-for="row in deptRowsFlat"
@@ -336,10 +340,10 @@
               @dragleave="onDeptDragLeave(row.dept)"
               @drop.prevent="onDeptDrop($event, row.dept)"
             >
-              <td class="col-drag" title="Drag to reorder"><i class="fa-solid fa-grip-vertical muted"></i></td>
+              <td class="col-drag" title="拖拽调整顺序"><i class="fa-solid fa-grip-vertical muted"></i></td>
               <td :style="{ paddingLeft: (12 + row.depth * 16) + 'px' }">
                 <span v-if="row.depth" class="dept-tree-prefix muted">└ </span>{{ row.dept.name }}
-                <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn-link btn-inline-edit" @click="openDept('edit', row.dept)" title="Edit department"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn-link btn-inline-edit" @click="openDept('edit', row.dept)" title="编辑部门"><i class="fa-solid fa-pen-to-square"></i></button>
               </td>
               <td>{{ parentDeptName(row.dept.parentId) }}</td>
               <td>{{ empName(row.dept.managerId) }}</td>
@@ -355,68 +359,68 @@
               <td class="dept-row-actions">
                 <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn-link"
                   :disabled="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0)"
-                  :title="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) ? 'Target HC 已达 HC Plan 上限' : ''"
-                  @click.stop="openPos('create', null, row.dept.id)">New HC slot</button>
+                  :title="(row.dept.hcPlan || 0) > 0 && deptPositionCount(row.dept.id) >= (row.dept.hcPlan || 0) ? '目标HC 已达 HC 计划上限' : ''"
+                  @click.stop="openPos('create', null, row.dept.id)">新增编制</button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
       <div class="card pad org-chart-card">
-        <h3 class="section-title">Organization chart</h3>
-        <p class="muted small org-chart-hint">默认收起，<strong>点击部门</strong>展开下属和 Target HC。<strong>右键</strong>部门新增 Target HC。节点显示员工姓名+状态，<strong>空编</strong>标 Vacant，点击可<strong>创建招聘需求</strong>。优先级：<strong class="recruit-legend high">High</strong>、<strong class="recruit-legend medium">Medium</strong>、<strong class="recruit-legend low">Low</strong>。</p>
-        <!-- old hint removed -->
+        <h3 class="section-title">组织架构图</h3>
+        <p class="muted small org-chart-hint">默认收起，<strong>点击部门</strong>展开下属和目标HC。<strong>右键</strong>部门新增目标HC。节点显示员工姓名+状态，<strong>空编</strong>标「空岗」，点击可<strong>创建招聘需求</strong>。优先级：<strong class="recruit-legend high">高</strong>、<strong class="recruit-legend medium">中</strong>、<strong class="recruit-legend low">低</strong>。</p>
+        <!-- 旧提示已移除 -->
         <div ref="chartRef" class="chart-tall org-chart-canvas"></div>
-        <h4 class="subsection-title">Current HC by department</h4>
-        <p class="muted small">Active (non-leaving) employees per department; matches department nodes on the chart.</p>
+        <h4 class="subsection-title">各部门实际HC</h4>
+        <p class="muted small">各部门在职（非离职）人数；与架构图部门节点一致。</p>
         <div ref="deptCountBarRef" class="chart-box short dept-in-org-bar"></div>
       </div>
 
       <div class="card pad">
-        <h3 class="section-title">Open recruitment requests</h3>
-        <p class="muted small">标记为 <strong>Open</strong> 的空编 Target HC，按 <strong>High → Medium → Low</strong> 排序。可在此调整优先级或取消标记（<strong>无需审批</strong>）。与 <router-link to="/hrbp/recruitment">Recruitment</router-link> 模块同步。</p>
+        <h3 class="section-title">开放中的招聘需求</h3>
+        <p class="muted small">标记为 <strong>开放</strong> 的空编目标HC，按 <strong>高 → 中 → 低</strong> 排序。可在此调整优先级或取消标记（<strong>无需审批</strong>）。与 <router-link to="/hrbp/recruitment">招聘</router-link> 模块同步。</p>
         <table v-if="recruitListRows.length" class="data-table compact recruit-list-table">
-          <thead><tr><th>Priority</th><th>Department</th><th>Role</th><th>Level</th><th></th></tr></thead>
+          <thead><tr><th>优先级</th><th>部门</th><th>岗位</th><th>级别</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="row in recruitListRows" :key="row.key">
               <td>
                 <select v-if="auth.hasPermission('org.recruitTag')" class="recruit-priority-select" :value="row.priority" @change="onRecruitPriorityChange(row, $event)">
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
+                  <option value="high">高</option>
+                  <option value="medium">中</option>
+                  <option value="low">低</option>
                 </select>
                 <span v-else class="recruit-legend" :class="row.priority">{{ row.priority }}</span>
               </td>
               <td>{{ row.deptName }}</td>
               <td>{{ row.positionName }}</td>
               <td>{{ row.level }}</td>
-              <td><button v-if="auth.hasPermission('org.recruitTag')" type="button" class="btn-link danger" @click="removeRecruitRow(row)">Clear open tag</button></td>
+              <td><button v-if="auth.hasPermission('org.recruitTag')" type="button" class="btn-link danger" @click="removeRecruitRow(row)">清除开放标记</button></td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted small">No open vacant slots. Expand a department on the chart, click a vacant slot, and mark it open to add it here.</p>
+        <p v-else class="muted small">暂无开放中的空编。请在架构图中展开部门，点击空编并标记为开放后，将显示在此列表。</p>
       </div>
 
       <div v-if="deptModal" class="modal-backdrop" @click.self="deptModal = false">
         <div class="modal card">
-          <h3>{{ deptMode === 'create' ? 'Add department' : 'Edit department' }}</h3>
+          <h3>{{ deptMode === 'create' ? '添加部门' : '编辑部门' }}</h3>
           <form class="form-grid" @submit.prevent="saveDept">
-            <label class="field"><span>Name</span><input v-model="deptForm.name" required /></label>
-            <label class="field"><span>Parent department</span>
+            <label class="field"><span>名称</span><input v-model="deptForm.name" required /></label>
+            <label class="field"><span>上级部门</span>
               <select v-model="deptForm.parentId">
-                <option :value="null">None (top-level)</option>
-                <option v-for="d in data.departments" :key="d.id" :value="d.id" :disabled="d.id === deptForm.id">{{ d.name }}</option>
+                <option :value="null">无（顶级部门）</option>
+                <option v-for="d in data.departments" :key="d.id" :value="d.id" :disabled="deptMode === 'edit' && (d.id === deptForm.id || isDescendantDept(deptForm.id, d.id))">{{ d.name }}</option>
               </select>
             </label>
-            <label class="field"><span>Department head</span>
+            <label class="field"><span>部门负责人</span>
               <select v-model.number="deptForm.managerId">
-                <option v-for="e in data.employees" :key="e.id" :value="e.id">{{ e.name }}</option>
+                <option v-for="e in data.employees.filter(x => x.status !== 'leave')" :key="e.id" :value="e.id">{{ e.name }}</option>
               </select>
             </label>
             <div class="modal-actions">
-              <button v-if="deptMode === 'edit'" type="button" class="btn btn-ghost danger" @click="removeDept">Delete</button>
-              <button type="button" class="btn btn-ghost" @click="deptModal = false">Cancel</button>
-              <button type="submit" class="btn btn-primary">Save</button>
+              <button v-if="deptMode === 'edit'" type="button" class="btn btn-ghost danger" @click="removeDept">删除</button>
+              <button type="button" class="btn btn-ghost" @click="deptModal = false">取消</button>
+              <button type="submit" class="btn btn-primary">保存</button>
             </div>
           </form>
         </div>
@@ -424,49 +428,49 @@
 
       <div v-if="posModal" class="modal-backdrop" @click.self="posModal = false">
         <div class="modal card">
-          <h3>{{ posMode === 'create' ? 'Add Target HC' : 'Edit Target HC' }}</h3>
+          <h3>{{ posMode === 'create' ? '添加目标HC' : '编辑目标HC' }}</h3>
           <form class="form-grid" @submit.prevent="savePos">
-            <label class="field"><span>Department</span>
+            <label class="field"><span>部门</span>
               <select v-model.number="posForm.departmentId" required>
                 <option v-for="d in data.departments" :key="d.id" :value="d.id">{{ d.name }}</option>
               </select>
             </label>
-            <label class="field"><span>Job function</span>
+            <label class="field"><span>岗位职能</span>
               <select v-model="posForm.name" required>
                 <option v-for="t in jobTradesList" :key="t" :value="t">{{ t }}</option>
               </select>
             </label>
-            <label class="field"><span>Level</span>
+            <label class="field"><span>级别</span>
               <select v-model="posForm.level" required>
                 <option v-for="lv in jobLevelsList" :key="lv" :value="lv">{{ lv }}</option>
               </select>
             </label>
-            <label class="field"><span>Reporting Manager</span>
+            <label class="field"><span>汇报经理</span>
               <select v-model="posForm.reportingManagerId">
-                <option value="">— None —</option>
+                <option value="">— 无 —</option>
                 <option v-for="mgr in deptManagerOptions" :key="mgr.id" :value="mgr.id">{{ mgr.name }}</option>
               </select>
             </label>
-            <label v-if="posMode === 'create'" class="field"><span>Quantity</span>
+            <label v-if="posMode === 'create'" class="field"><span>数量</span>
               <input type="number" min="1" max="50" v-model.number="posQuantity" required />
             </label>
             <p v-if="posMode === 'create' && posHcExceedMsg" class="small" style="grid-column:1/-1;color:#dc2626;font-weight:600;background:#fef2f2;padding:8px 12px;border-radius:6px;border:1px solid #fecaca">⚠ {{ posHcExceedMsg }}</p>
             <label v-if="posMode === 'create'" class="field full pos-create-options">
               <span class="checkbox-inline">
                 <input type="checkbox" v-model="posMarkRecruitAfterCreate" />
-                Mark as open after create (adds vacant slot to open list; set priority later)
+                创建后标记为开放（加入开放列表，优先级可稍后设置）
               </span>
             </label>
             <label v-if="posMode === 'create'" class="field full pos-create-options">
               <span class="checkbox-inline">
                 <input type="checkbox" v-model="posCreateRecruitReq" />
-                Create recruitment request for this position
+                为此岗位创建招聘需求
               </span>
             </label>
             <div class="modal-actions">
-              <button v-if="posMode === 'edit'" type="button" class="btn btn-ghost danger" @click="removePos">Delete</button>
-              <button type="button" class="btn btn-ghost" @click="posModal = false">Cancel</button>
-              <button type="submit" class="btn btn-primary" :disabled="posMode === 'create' && !!posHcExceedMsg">Save</button>
+              <button v-if="posMode === 'edit'" type="button" class="btn btn-ghost danger" @click="removePos">删除</button>
+              <button type="button" class="btn btn-ghost" @click="posModal = false">取消</button>
+              <button type="submit" class="btn btn-primary" :disabled="posMode === 'create' && !!posHcExceedMsg">保存</button>
             </div>
           </form>
         </div>
@@ -474,34 +478,34 @@
 
       <div v-if="slotModal && slotPosition" class="modal-backdrop" @click.self="closeSlotModal">
         <div class="modal card wide">
-          <h3>Target HC · {{ slotPosition.name }}</h3>
+          <h3>目标HC · {{ slotPosition.name }}</h3>
           <div class="form-grid" style="margin-bottom:12px">
-            <p class="muted small" style="grid-column:1/-1">Department: <strong>{{ deptName(slotCtx.deptId) }}</strong> · Level: <strong>{{ slotPosition.level || '—' }}</strong> · Reporting Manager: <strong>{{ slotPosition.reportingManagerId ? empName(slotPosition.reportingManagerId) : '—' }}</strong></p>
+            <p class="muted small" style="grid-column:1/-1">部门：<strong>{{ deptName(slotCtx.deptId) }}</strong> · 级别：<strong>{{ slotPosition.level || '—' }}</strong> · 汇报经理：<strong>{{ slotPosition.reportingManagerId ? empName(slotPosition.reportingManagerId) : '—' }}</strong></p>
             <div style="grid-column:1/-1">
-              <div class="muted small" style="margin-bottom:6px">Current HC (Incumbents)</div>
+              <div class="muted small" style="margin-bottom:6px">实际HC（在岗人员）</div>
               <ul v-if="slotAssignees.length" class="member-list">
                 <li v-for="e in slotAssignees" :key="e.id">{{ e.name }} · {{ statusLabel(e.status) }}</li>
               </ul>
-              <p v-else class="muted small">No incumbents — this is a <strong>vacant</strong> position. You can mark as open or create a recruitment request.</p>
+              <p v-else class="muted small">暂无在岗人员 — 此为<strong>空岗</strong>。可标记为开放或创建招聘需求。</p>
             </div>
             <label v-if="slotRecruiting" class="field" style="grid-column:1/-1">
-              <span>Recruiting priority</span>
+              <span>招聘优先级</span>
               <select :value="slotRecruitPriority" @change="onSlotRecruitPriorityChange($event)">
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低</option>
               </select>
             </label>
           </div>
           <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
             <button v-if="slotVacant && !slotRecruiting && auth.hasPermission('org.recruitTag')" type="button" class="btn btn-primary" @click="createRecruitFromSlot">
-              <i class="fa-solid fa-plus"></i> Create recruitment request
+              <i class="fa-solid fa-plus"></i> 创建招聘需求
             </button>
             <button v-if="slotVacant && auth.hasPermission('org.recruitTag')" type="button" class="btn" :class="slotRecruiting ? 'btn-secondary' : 'btn-ghost'" @click="toggleRecruitSlot">
-              {{ slotRecruiting ? 'Clear open tag' : 'Mark as open' }}
+              {{ slotRecruiting ? '清除开放标记' : '标记为开放' }}
             </button>
-            <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPosFromSlot">Edit HC slot</button>
-            <button type="button" class="btn btn-ghost" @click="closeSlotModal">Close</button>
+            <button v-if="auth.hasPermission('org.submitChange')" type="button" class="btn btn-secondary" @click="openPosFromSlot">编辑编制</button>
+            <button type="button" class="btn btn-ghost" @click="closeSlotModal">关闭</button>
           </div>
         </div>
       </div>
@@ -585,7 +589,51 @@
         return null;
       },
       set(v) {
-        data.updateOrgSettings({ productLineOwnerEmployeeId: v != null ? Number(v) : null });
+        const eid = v != null ? Number(v) : null;
+        data.updateOrgSettings({ productLineOwnerEmployeeId: eid });
+        if (eid == null) return;
+        const emp = data.employees.find((e) => e.id === eid);
+        if (!emp) return;
+        const allMgrModules = window.TM.MGR_MODULES;
+        const allOpsOn = window.TM.RM_ALL_OPS_ON;
+        let account = data.users.find((u) => Number(u.employeeId) === eid);
+        if (!account) {
+          const maxId = data.users.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0);
+          const email = emp.email || (String(emp.name || 'pl').replace(/\s+/g, '.') + '@company.com').toLowerCase();
+          account = {
+            id: maxId + 1,
+            username: email.split('@')[0],
+            email,
+            password: '123',
+            realName: emp.name,
+            role: 'manager',
+            employeeId: eid,
+            homeLineId: window.TM.useProductLineStore().currentLineId,
+            rmStatus: 'active',
+            managerPermissions: { modules: allMgrModules.slice(), ops: allOpsOn() },
+          };
+          data.users.push(account);
+          data._markDirty('users');
+          data.persistAll();
+          window.dispatchEvent(new CustomEvent('tm-toast', {
+            detail: { message: `已为「${emp.name}」自动创建产品线负责人账号（默认密码: 123，请及时修改）`, type: 'success' },
+          }));
+        } else {
+          let changed = false;
+          if (account.role !== 'manager') { account.role = 'manager'; changed = true; }
+          if (account.rmStatus !== 'active') { account.rmStatus = 'active'; changed = true; }
+          if (!account.managerPermissions) {
+            account.managerPermissions = { modules: allMgrModules.slice(), ops: allOpsOn() };
+            changed = true;
+          }
+          if (changed) {
+            data._markDirty('users');
+            data.persistAll();
+            window.dispatchEvent(new CustomEvent('tm-toast', {
+              detail: { message: `已将「${emp.name}」的账号激活为产品线负责人`, type: 'success' },
+            }));
+          }
+        }
       },
     });
 
@@ -596,16 +644,16 @@
 
     function orgTypeLabel(t) {
       return {
-        dept_create: 'Add department',
-        dept_delete: 'Remove department',
-        dept_update: 'Department change',
-        position_create: 'Add Target HC',
-        position_delete: 'Remove Target HC',
-        position_update: 'Update Target HC',
+        dept_create: '新增部门',
+        dept_delete: '删除部门',
+        dept_update: '部门变更',
+        position_create: '新增编制',
+        position_delete: '删除编制',
+        position_update: '编制变更',
       }[t] || t;
     }
     function orgStatusLabel(s) {
-      return { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' }[s] || s;
+      return { pending: '待审批', approved: '已通过', rejected: '已驳回' }[s] || s;
     }
     function chainNames(ids) {
       return (ids || []).map((id) => empName(id)).join(' → ');
@@ -660,6 +708,11 @@
       return true;
     }
 
+    function isDescendantDept(ancestorId, candId) {
+      if (ancestorId == null) return false;
+      return isDescendantOf(ancestorId, candId);
+    }
+
     function onDeptDragStart(e, d) {
       draggingDeptId.value = d.id;
       e.dataTransfer.effectAllowed = 'move';
@@ -711,7 +764,7 @@
         submitter: submitter.value,
       });
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dResult?.status === 'approved' ? '部门层级已调整（已自动生效）' : '已提交审批：调整部门层级', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dResult?.status === 'approved' ? (dResult.approvalChain?.length ? '审批已通过，部门层级已调整' : '部门层级已调整（已自动生效）') : '已提交审批：调整部门层级', type: 'success' } }));
     }
 
     function onRootDragOver(e) {
@@ -738,7 +791,7 @@
         submitter: submitter.value,
       });
       renderChart();
-      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: rResult?.status === 'approved' ? '已设为顶级部门（已自动生效）' : '已提交审批：设为顶级部门', type: 'success' } }));
+      window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: rResult?.status === 'approved' ? (rResult.approvalChain?.length ? '审批已通过，已设为顶级部门' : '已设为顶级部门（已自动生效）') : '已提交审批：设为顶级部门', type: 'success' } }));
     }
 
     const slotPosition = computed(() => {
@@ -874,19 +927,19 @@
     }
 
     function productLineLeaderName() {
-      const pd = data.departments.find((d) => d.name === 'Product' || d.name === '产品部');
-      if (pd?.managerId != null) {
-        const nm = empName(pd.managerId);
+      var ploEid = data.orgSettings?.productLineOwnerEmployeeId;
+      if (ploEid != null) {
+        var nm = empName(Number(ploEid));
         if (nm && nm !== '—') return nm;
       }
-      const roots = [...data.departments]
+      var roots = [...data.departments]
         .filter((d) => d.parentId == null)
         .sort((a, b) => Number(a.id) - Number(b.id));
-      for (let i = 0; i < roots.length; i += 1) {
-        const r = roots[i];
+      for (var i = 0; i < roots.length; i++) {
+        var r = roots[i];
         if (r.managerId == null) continue;
-        const nm = empName(r.managerId);
-        if (nm && nm !== '—') return nm;
+        var rn = empName(r.managerId);
+        if (rn && rn !== '—') return rn;
       }
       return '—';
     }
@@ -1040,17 +1093,6 @@
       drawDeptCountBar();
     }
 
-    watch(
-      () => [data.orgSettings?.productLineOwnerEmployeeId, data.employees.length],
-      () => {
-        if (data.orgSettings?.productLineOwnerEmployeeId != null) return;
-        if (!data.employees.length) return;
-        const first = [...data.employees].filter((e) => e.status !== 'leave').sort((a, b) => a.id - b.id)[0];
-        if (first) data.updateOrgSettings({ productLineOwnerEmployeeId: first.id });
-      },
-      { immediate: true },
-    );
-
     onMounted(async () => {
       echartsLib = await loadEcharts();
       renderChart();
@@ -1108,7 +1150,7 @@
           submitter: submitter.value,
         });
         if (dcResult) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dcResult.status === 'approved' ? '部门已创建（已自动生效）' : '已提交审批：新增部门', type: 'success' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: dcResult.status === 'approved' ? (dcResult.approvalChain?.length ? '审批已通过，部门已创建' : '部门已创建（已自动生效）') : '已提交审批：新增部门', type: 'success' } }));
         } else {
           window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '部门创建失败', type: 'error' } }));
         }
@@ -1130,7 +1172,7 @@
           submitter: submitter.value,
         });
         if (duResult) {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: duResult.status === 'approved' ? '部门已更新（已自动生效）' : '已提交审批：更新部门', type: 'success' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: duResult.status === 'approved' ? (duResult.approvalChain?.length ? '审批已通过，部门已更新' : '部门已更新（已自动生效）') : '已提交审批：更新部门', type: 'success' } }));
         } else {
           window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '部门更新失败', type: 'error' } }));
         }
@@ -1151,7 +1193,7 @@
       deptModal.value = false;
       renderChart();
       if (ddResult) {
-        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: ddResult.status === 'approved' ? '部门已删除（已自动生效）' : '已提交审批：删除部门', type: 'success' } }));
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: ddResult.status === 'approved' ? (ddResult.approvalChain?.length ? '审批已通过，部门已删除' : '部门已删除（已自动生效）') : '已提交审批：删除部门', type: 'success' } }));
       } else {
         window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '删除部门失败', type: 'error' } }));
       }
@@ -1323,7 +1365,7 @@
     }
 
     return {
-      data, auth, _zs, orgOwnerId, orgRequestsSorted, orgActiveRequests, orgHistoryRequests, showOrgHistory, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq,
+      data, auth, _zs, orgOwnerId, orgRequestsSorted, orgActiveRequests, orgHistoryRequests, showOrgHistory, orgTypeLabel, orgStatusLabel, chainNames, canApproveAsMe, approveOrgReq, rejectOrgReq, isDescendantDept, deptMode,
       chartRef, deptCountBarRef, deptModal, deptMode, deptForm,
       posModal, posMode, posForm, posMarkRecruitAfterCreate, posCreateRecruitReq, posQuantity, posHcExceedMsg, jobTradesList, jobLevelsList,
       deptManagerOptions, fulfillmentRate, onHcPlanChange,

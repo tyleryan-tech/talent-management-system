@@ -102,9 +102,9 @@ const EMPLOYEE_EXTRA_DEFAULTS = {
 
 function jobTradesList() {
   const t = window.TM.JOB_TRADES;
-  return Array.isArray(t) && t.length
-    ? t
-    : ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data'];
+  if (Array.isArray(t) && t.length) return t;
+  console.warn('[dataStore] TM.JOB_TRADES not loaded, using fallback');
+  return ['Frontend', 'Mobile', 'Backend', 'SDET', 'QA', 'Algorithm', 'Big Data'];
 }
 
 /** Legacy Chinese trade labels from imports / old persisted data → canonical English */
@@ -191,12 +191,69 @@ function schedulePersistAll(store, options) {
 
 const ALL_PERSIST_KEYS = [
   'employees', 'departments', 'positions', 'leaveRequests', 'performanceReviews',
-  'trainings', 'employeeTrainings', 'users', 'attendanceRules', 'attendanceRecords',
+  'trainings', 'employeeTrainings', 'attendanceRules', 'attendanceRecords',
   'punchRecords', 'kpiLibrary', 'performanceCycles', 'talentMatrix', 'successionPlans',
   'notifications', 'positionRecruitTags', 'recruitmentCandidates',
   'recruitmentPositionMetrics', 'recruitmentPipeline', 'interviewerPool',
   'orgSettings', 'orgChangeRequests', 'rosterColumnSettings',
 ];
+
+const GLOBAL_USERS_KEY = 'tm_global_users';
+
+function globalLoadUsers() {
+  try {
+    const raw = localStorage.getItem(GLOBAL_USERS_KEY);
+    if (raw != null) return JSON.parse(raw);
+  } catch (_) { /* ignore */ }
+  return null;
+}
+
+function globalSaveUsers(users) {
+  try {
+    const out = (users || []).map(function (u) {
+      if (!u.password || u._hashed) return u;
+      return Object.assign({}, u, { password: _simpleHash(u.password), _hashed: true });
+    });
+    localStorage.setItem(GLOBAL_USERS_KEY, JSON.stringify(out));
+  } catch (_) { /* ignore */ }
+}
+function _simpleHash(str) {
+  var h = 0;
+  for (var i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return 'h$' + (h >>> 0).toString(36);
+}
+window.TM._simpleHash = _simpleHash;
+
+function migratePerLineUsersToGlobal() {
+  if (globalLoadUsers() != null) return;
+  const pl = window.TM.useProductLineStore?.();
+  if (!pl) return;
+  const merged = new Map();
+  (pl.lines || []).forEach((line) => {
+    const lineUsers = window.TM.loadKeyForLine(line.id, 'users', null);
+    if (!Array.isArray(lineUsers)) return;
+    lineUsers.forEach((u) => {
+      const key = String(u.email || u.username || u.id).toLowerCase();
+      if (!merged.has(key)) {
+        merged.set(key, { ...u });
+      } else {
+        const existing = merged.get(key);
+        if (u.superAdmin && !existing.superAdmin) merged.set(key, { ...u });
+      }
+    });
+  });
+  if (merged.size > 0) {
+    let nextId = 1;
+    const result = [];
+    merged.forEach((u) => {
+      u.id = nextId++;
+      result.push(u);
+    });
+    globalSaveUsers(result);
+  }
+}
 
 /** 域注册表：将 state key 映射到业务域名称 */
 const DOMAIN_REGISTRY = (() => {
@@ -292,8 +349,24 @@ window.TM.useDataStore = defineStore('data', {
   }),
   actions: {
     hydrate() {
+      if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+      _dirtyKeys.clear();
       const rawEmps = lineScopedLoad('employees', []);
-      this.employees = (rawEmps || []).map((e) => ({ ...EMPLOYEE_EXTRA_DEFAULTS, ...e }));
+      {
+        const seen = new Set();
+        const deduped = [];
+        (rawEmps || []).forEach((e) => {
+          const id = Number(e.id);
+          if (Number.isNaN(id) || seen.has(id)) return;
+          seen.add(id);
+          deduped.push({ ...EMPLOYEE_EXTRA_DEFAULTS, ...e });
+        });
+        this.employees = deduped;
+        if (deduped.length !== (rawEmps || []).length) {
+          console.warn(`[dataStore] 员工去重: ${(rawEmps || []).length} → ${deduped.length}`);
+          lineScopedSave('employees', deduped);
+        }
+      }
       this.departments = (lineScopedLoad('departments', []) || []).map((d) => ({ hcPlan: 0, ...d }));
       {
         const rawPos = lineScopedLoad('positions', []) || [];
@@ -317,12 +390,13 @@ window.TM.useDataStore = defineStore('data', {
       this.trainings = lineScopedLoad('trainings', []);
       this.employeeTrainings = lineScopedLoad('employeeTrainings', []);
       {
-        const rawUsers = lineScopedLoad('users', []) || [];
+        migratePerLineUsersToGlobal();
+        const rawUsers = globalLoadUsers() || lineScopedLoad('users', []) || [];
         const { users: nu, changed: usersNorm } = normalizeUsersWithDemoEmails(rawUsers);
         this.users = nu;
         if (usersNorm) {
           try {
-            lineScopedSave('users', this.users);
+            globalSaveUsers(this.users);
           } catch (_) {
             /* ignore */
           }
@@ -388,12 +462,17 @@ window.TM.useDataStore = defineStore('data', {
     },
     _doPersistAll(options) {
       const skipRemote = options && options.skipRemote === true;
-      const keysToWrite = _dirtyKeys.size > 0 ? [..._dirtyKeys].filter((k) => ALL_PERSIST_KEYS.includes(k)) : ALL_PERSIST_KEYS;
+      const allDirty = [..._dirtyKeys];
+      const keysToWrite = allDirty.length > 0 ? allDirty.filter((k) => ALL_PERSIST_KEYS.includes(k)) : ALL_PERSIST_KEYS;
+      const usersNeedWrite = allDirty.includes('users') || _dirtyKeys.size === 0;
       _dirtyKeys.clear();
       const OBJ_KEYS = new Set(['positionRecruitTags', 'attendanceRules', 'orgSettings', 'recruitmentPositionMetrics']);
       keysToWrite.forEach((k) => {
         lineScopedSave(k, this[k] ?? (OBJ_KEYS.has(k) ? {} : []));
       });
+      if (usersNeedWrite) {
+        globalSaveUsers(this.users || []);
+      }
       if (window.TM._DEBUG_PERSIST) {
         const groups = groupDirtyKeysByDomain(keysToWrite);
         console.debug('[dataStore] persist domains:', groups);
@@ -407,16 +486,33 @@ window.TM.useDataStore = defineStore('data', {
       keys.forEach((k) => _dirtyKeys.add(k));
     },
     persistAll(options) {
-      if (_dirtyKeys.size === 0) ALL_PERSIST_KEYS.forEach((k) => _dirtyKeys.add(k));
+      if (_dirtyKeys.size === 0) return;
+      schedulePersistAll(this, options);
+    },
+    persistAllForce(options) {
+      ALL_PERSIST_KEYS.forEach((k) => _dirtyKeys.add(k));
+      _dirtyKeys.add('users');
       schedulePersistAll(this, options);
     },
     persistAllSync(options) {
       if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
-      if (_dirtyKeys.size === 0) ALL_PERSIST_KEYS.forEach((k) => _dirtyKeys.add(k));
+      if (_dirtyKeys.size === 0) return;
       this._doPersistAll(options);
+    },
+    /**
+     * 产品线切换前：同步写入当前线全部脏数据，然后清空脏标记和防抖定时器。
+     * 必须在 currentLineId 改变之前调用，否则数据会写入错误产品线。
+     */
+    flushBeforeLineSwitch() {
+      if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+      if (_dirtyKeys.size > 0) {
+        this._doPersistAll({ skipRemote: true });
+      }
+      _dirtyKeys.clear();
     },
     persistKeys(...keys) {
       keys.forEach((k) => {
+        if (k === 'users') { globalSaveUsers(this.users || []); return; }
         if (ALL_PERSIST_KEYS.includes(k)) lineScopedSave(k, this[k] ?? []);
       });
     },
@@ -451,7 +547,9 @@ window.TM.useDataStore = defineStore('data', {
       });
       this.talentMatrix = dedupeTalentMatrix(tm);
 
-      this.performanceReviews = (this.performanceReviews || []).filter((r) => empIds.has(Number(r.employeeId)));
+      this.performanceReviews = (this.performanceReviews || []).filter((r) =>
+        empIds.has(Number(r.employeeId)) || r.status === 'finalized' || r.status === 'pl_approved',
+      );
       this.leaveRequests = (this.leaveRequests || []).filter(
         (r) => empIds.has(Number(r.employeeId)) && (r.approverId == null || empIds.has(Number(r.approverId))),
       );
@@ -465,16 +563,20 @@ window.TM.useDataStore = defineStore('data', {
         ...s,
         successorIds: (s.successorIds || []).filter((id) => empIds.has(Number(id))),
       }));
-      this.users = (this.users || []).map((u) => {
-        if (u.employeeId != null && !empIds.has(Number(u.employeeId))) {
-          return { ...u, employeeId: null };
-        }
-        return u;
-      });
+      // users 是全局存储，不因当前产品线缺少某员工就清除 employeeId；
+      // 仅在员工被从所有产品线彻底删除时（手动操作）才解绑。
       this.interviewerPool = (this.interviewerPool || []).filter((p) => empIds.has(Number(p.employeeId)));
+      if (this.recruitmentCandidates && this.recruitmentCandidates.length) {
+        this.recruitmentCandidates = this.recruitmentCandidates.map((c) => {
+          const patch = {};
+          if (c.responsibleId != null && !empIds.has(Number(c.responsibleId))) patch.responsibleId = null;
+          if (c.interviewerId != null && !empIds.has(Number(c.interviewerId))) patch.interviewerId = null;
+          return Object.keys(patch).length ? { ...c, ...patch } : c;
+        });
+      }
       this._markDirty('talentMatrix', 'performanceReviews', 'leaveRequests',
         'employeeTrainings', 'notifications', 'attendanceRecords', 'punchRecords',
-        'successionPlans', 'users', 'interviewerPool');
+        'successionPlans', 'interviewerPool', 'recruitmentCandidates');
     },
     // 员工
     addEmployee(row) {
@@ -514,6 +616,18 @@ window.TM.useDataStore = defineStore('data', {
       this.syncEmployeeLinkedDataFromRoster();
       this._markDirty('employees', 'talentMatrix', 'notifications');
       this.persistAll();
+      const deptSet = new Set(this.departments.map((d) => d.id));
+      const posSet = new Set(this.positions.map((p) => p.id));
+      let fkWarn = 0;
+      addedIds.forEach((id) => {
+        const e = this.employees.find((x) => x.id === id);
+        if (!e) return;
+        if (e.departmentId && !deptSet.has(Number(e.departmentId))) fkWarn++;
+        if (e.positionId && !posSet.has(Number(e.positionId))) fkWarn++;
+      });
+      if (fkWarn > 0) {
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: fkWarn + ' 条导入记录包含无效的部门或岗位引用，请核查', type: 'warning' } }));
+      }
       return { added: addedIds.length, ids: addedIds };
     },
     /**
@@ -549,6 +663,10 @@ window.TM.useDataStore = defineStore('data', {
     updateEmployee(id, patch) {
       const i = this.employees.findIndex((e) => e.id === id);
       if (i >= 0) {
+        const warnings = this._validateEmployeeFKs(patch);
+        if (warnings.length) {
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: warnings.join('；'), type: 'warning' } }));
+        }
         const oldManagerId = this.employees[i].managerId;
         this.employees[i] = { ...this.employees[i], ...patch };
         this.syncEmployeeLinkedDataFromRoster();
@@ -606,8 +724,9 @@ window.TM.useDataStore = defineStore('data', {
         child.parentId = parent;
       });
       this.departments = this.departments.filter((d) => d.id !== did);
+      const fallbackDeptId = parent != null ? parent : (this.departments[0]?.id || null);
       this.employees.forEach((e) => {
-        if (Number(e.departmentId) === did) e.departmentId = parent;
+        if (Number(e.departmentId) === did) e.departmentId = fallbackDeptId;
       });
       this.positions = this.positions.filter((p) => p.departmentId !== did);
       this._markDirty('departments', 'employees', 'positions', 'positionRecruitTags');
@@ -641,14 +760,24 @@ window.TM.useDataStore = defineStore('data', {
       const depId = Number(merged.departmentId);
       if (Number.isNaN(depId)) return false;
       const oldName = this.positions[i].name;
+      const oldRmId = this.positions[i].reportingManagerId || null;
+      const newRmId = merged.reportingManagerId ? Number(merged.reportingManagerId) : null;
       this.positions[i] = {
         ...merged,
         id: this.positions[i].id,
         name,
         departmentId: depId,
         level: normalizeJobLevel(merged.level),
-        reportingManagerId: merged.reportingManagerId || null,
+        reportingManagerId: newRmId,
       };
+      if (newRmId && newRmId !== oldRmId) {
+        this.employees.forEach((e) => {
+          if (Number(e.positionId) === id && Number(e.departmentId) === depId && !e.managerId) {
+            e.managerId = newRmId;
+          }
+        });
+        this._markDirty('employees');
+      }
       if (oldName && name && oldName !== name) {
         const oldLower = oldName.trim().toLowerCase();
         (this.recruitmentPipeline || []).forEach((c) => {
@@ -912,17 +1041,26 @@ window.TM.useDataStore = defineStore('data', {
       this.persistAll();
       return id;
     },
-    /** RM 提交初评并进入逐级审批（无上级时直接归档） */
-    /**
-     * 当员工的 managerId 变更时，重建该员工所有进行中（rm_pending / in_approval）绩效评审的审批链
-     */
+    _validateEmployeeFKs(patch) {
+      const w = [];
+      if (patch.departmentId != null && !this.departments.some((d) => d.id === Number(patch.departmentId))) {
+        w.push('所选部门不存在');
+      }
+      if (patch.positionId != null && !this.positions.some((p) => p.id === Number(patch.positionId))) {
+        w.push('所选岗位不存在');
+      }
+      if (patch.managerId != null && patch.managerId !== '' && !this.employees.some((e) => e.id === Number(patch.managerId))) {
+        w.push('所选汇报经理不存在');
+      }
+      return w;
+    },
     _rebuildPendingApprovalChains(employeeId) {
       const TM = window.TM;
       if (typeof TM.buildApprovalChainAboveRm !== 'function') return;
       const eid = Number(employeeId);
       this.performanceReviews.forEach((r) => {
         if (Number(r.employeeId) !== eid) return;
-        if (r.status !== 'rm_pending' && r.status !== 'in_approval') return;
+        if (r.status !== 'rm_pending' && r.status !== 'rm_evaluated' && r.status !== 'in_approval') return;
         const emp = this.employees.find((e) => e.id === eid);
         if (!emp || !emp.managerId) return;
         const newReviewerId = emp.managerId;
@@ -931,6 +1069,8 @@ window.TM.useDataStore = defineStore('data', {
         r.approvalChain = newChain;
         if (r.status === 'rm_pending') {
           r.pendingApproverId = newReviewerId;
+          r.approvalStepIndex = 0;
+        } else if (r.status === 'rm_evaluated') {
           r.approvalStepIndex = 0;
         } else if (r.status === 'in_approval') {
           const currentApprover = Number(r.pendingApproverId);
@@ -946,8 +1086,8 @@ window.TM.useDataStore = defineStore('data', {
       });
       this._markDirty('performanceReviews');
     },
-    /** actorOptions: { actorId, isHrbp } — 允许 RM 上级/HRBP 代评 */
-    submitRmPerformanceReview(reviewId, payload, actorOptions) {
+    /** RM 保存评估（不提交审批链）：rm_pending → rm_evaluated */
+    saveRmEvaluation(reviewId, payload, actorOptions) {
       const TM = window.TM;
       const grades = TM.PERF_GRADE_OPTIONS;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
@@ -966,40 +1106,80 @@ window.TM.useDataStore = defineStore('data', {
       if (!grades.includes(g)) return false;
       const outDesc = String(payload.outputDescription || '').trim();
       if (!outDesc) return false;
-      const chain = TM.buildApprovalChainAboveRm(this, r.reviewerId);
       const today = new Date().toISOString().slice(0, 10);
       const proxyNote = actorId !== Number(r.reviewerId) ? `（由 ${this._empMap.get(actorId)?.name || actorId} 代评）` : '';
-      const log = [...(r.approvalLog || []), { approverId: actorId, at: today, action: 'submit', note: 'RM 提交初评' + proxyNote }];
-      const base = {
+      const log = [...(r.approvalLog || []), { approverId: actorId, at: today, action: 'evaluate', note: 'RM 完成评估' + proxyNote }];
+      this.performanceReviews[i] = {
         ...r,
         historyPerformance: String(payload.historyPerformance || '').trim(),
         outputDescription: outDesc,
         rmInitialGrade: g,
         rmComment: String(payload.rmComment || '').trim(),
         prevCycleAvgHours: payload.prevCycleAvgHours != null && payload.prevCycleAvgHours !== ''
-          ? Math.round(Number(payload.prevCycleAvgHours) * 10) / 10
-          : null,
+          ? Math.round(Number(payload.prevCycleAvgHours) * 10) / 10 : null,
         comments: String(payload.comments || '').trim(),
         devAdvice: String(payload.devAdvice || '').trim(),
-        approvalChain: chain,
         approvalLog: log,
+        status: 'rm_evaluated',
+        pendingApproverId: null,
       };
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return true;
+    },
+    /** RM 批量提交：将该 RM 在指定周期内所有 rm_evaluated 评估一次性推入审批链 */
+    batchSubmitReviews(managerEmpId, cycleId) {
+      const TM = window.TM;
+      const mgrId = Number(managerEmpId);
+      const targets = this.performanceReviews.filter((r) =>
+        r.cycleId === cycleId && Number(r.reviewerId) === mgrId && r.status === 'rm_evaluated',
+      );
+      if (!targets.length) return 0;
+      const today = new Date().toISOString().slice(0, 10);
+      let count = 0;
+      targets.forEach((r) => {
+        const idx = this.performanceReviews.indexOf(r);
+        if (idx < 0) return;
+        const chain = TM.buildApprovalChainAboveRm(this, r.reviewerId);
+        const log = [...(r.approvalLog || []), { approverId: mgrId, at: today, action: 'batch_submit', note: '批量提交审批' }];
+        if (!chain.length) {
+          this.performanceReviews[idx] = {
+            ...r, approvalChain: chain, approvalLog: log, approvalStepIndex: 0,
+            pendingApproverId: null, finalGrade: '', status: 'pl_pending',
+          };
+        } else {
+          this.performanceReviews[idx] = {
+            ...r, approvalChain: chain, approvalLog: log, approvalStepIndex: 0,
+            pendingApproverId: chain[0], finalGrade: '', status: 'in_approval',
+            levelApprovedBy: null,
+          };
+        }
+        count++;
+      });
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return count;
+    },
+    /** 保留旧接口用于兼容（HRBP 代评时仍可单条提交） */
+    submitRmPerformanceReview(reviewId, payload, actorOptions) {
+      if (!this.saveRmEvaluation(reviewId, payload, actorOptions)) return false;
+      const r = this.performanceReviews.find((x) => x.id === reviewId);
+      if (!r) return false;
+      const TM = window.TM;
+      const chain = TM.buildApprovalChainAboveRm(this, r.reviewerId);
+      const today = new Date().toISOString().slice(0, 10);
+      const idx = this.performanceReviews.indexOf(r);
+      const log = [...(r.approvalLog || []), { approverId: actorOptions?.actorId || r.reviewerId, at: today, action: 'batch_submit', note: '提交审批' }];
       if (!chain.length) {
-        this.performanceReviews[i] = {
-          ...base, approvalStepIndex: 0, pendingApproverId: null,
-          finalGrade: '', status: 'pl_approved',
-        };
+        this.performanceReviews[idx] = { ...r, approvalChain: chain, approvalLog: log, approvalStepIndex: 0, pendingApproverId: null, finalGrade: '', status: 'pl_pending' };
       } else {
-        this.performanceReviews[i] = {
-          ...base, approvalStepIndex: 0, pendingApproverId: chain[0],
-          finalGrade: '', status: 'in_approval',
-        };
+        this.performanceReviews[idx] = { ...r, approvalChain: chain, approvalLog: log, approvalStepIndex: 0, pendingApproverId: chain[0], finalGrade: '', status: 'in_approval', levelApprovedBy: null };
       }
       this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
-    /** 逐级审批：当前待办人通过（可同时校准等级）；末级审批后进入 pl_approved；支持上级/HRBP 代审批 */
+    /** 逐级审批：记录审批并自动推进；当某一级所有评审均审批完毕时自动推进到下一级 */
     approvePerformanceReview(reviewId, actorEmployeeId, note, adjustedGrade) {
       const TM = window.TM;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
@@ -1029,22 +1209,49 @@ window.TM.useDataStore = defineStore('data', {
         note: String(note || '').trim() + (newGrade && newGrade !== r.rmInitialGrade ? ` [等级调整为 ${newGrade}]` : '') + proxyNote,
       }];
       const gradeUpdate = newGrade ? { rmInitialGrade: newGrade } : {};
-      if (idx >= chain.length - 1) {
-        this.performanceReviews[i] = {
-          ...r, ...gradeUpdate, approvalStepIndex: chain.length, pendingApproverId: null,
-          approvalLog: log, status: 'pl_approved',
-        };
-      } else {
-        const next = chain[idx + 1];
-        this.performanceReviews[i] = {
-          ...r, ...gradeUpdate, approvalStepIndex: idx + 1, pendingApproverId: next, approvalLog: log,
-        };
-      }
+
+      this.performanceReviews[i] = {
+        ...r, ...gradeUpdate, approvalLog: log, levelApprovedBy: actorId,
+      };
       this._markDirty('performanceReviews');
+
+      this._checkAutoAdvance(pendingId, r.cycleId);
       this.persistAll();
       return true;
     },
-    /** 逐级审批：驳回到上一级审批人校准（若已在第一级则退回 RM）；支持上级/HRBP 代驳回 */
+    /** 检查某一级审批人的所有评审是否均已审批，如全部完成则自动推进 */
+    _checkAutoAdvance(approverId, cycleId) {
+      const TM = window.TM;
+      const aid = Number(approverId);
+      const peers = this.performanceReviews.filter((r) =>
+        r.cycleId === cycleId && r.status === 'in_approval' && Number(r.pendingApproverId) === aid,
+      );
+      if (!peers.length) return;
+      const allApproved = peers.every((r) => r.levelApprovedBy != null);
+      if (!allApproved) return;
+
+      peers.forEach((r) => {
+        const idx = this.performanceReviews.indexOf(r);
+        if (idx < 0) return;
+        const chain = r.approvalChain || [];
+        const stepIdx = chain.indexOf(aid);
+        if (stepIdx < 0) return;
+        if (stepIdx >= chain.length - 1) {
+          this.performanceReviews[idx] = {
+            ...r, approvalStepIndex: chain.length, pendingApproverId: null,
+            status: 'pl_pending', levelApprovedBy: null,
+          };
+        } else {
+          const next = chain[stepIdx + 1];
+          this.performanceReviews[idx] = {
+            ...r, approvalStepIndex: stepIdx + 1, pendingApproverId: next,
+            levelApprovedBy: null,
+          };
+        }
+      });
+      this._markDirty('performanceReviews');
+    },
+    /** 驳回到上一级审批人（若已在第一级则退回 RM） */
     rejectPerformanceReview(reviewId, actorEmployeeId, note) {
       const TM = window.TM;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
@@ -1073,26 +1280,91 @@ window.TM.useDataStore = defineStore('data', {
         const prev = chain[idx - 1];
         this.performanceReviews[i] = {
           ...r, status: 'in_approval', approvalStepIndex: idx - 1,
-          pendingApproverId: prev, approvalLog: log,
+          pendingApproverId: prev, approvalLog: log, levelApprovedBy: null,
         };
       } else {
         this.performanceReviews[i] = {
           ...r, status: 'rm_pending', approvalStepIndex: 0,
-          pendingApproverId: r.reviewerId, approvalLog: log, finalGrade: '',
+          pendingApproverId: r.reviewerId, approvalLog: log, finalGrade: '', levelApprovedBy: null,
         };
       }
       this._markDirty('performanceReviews');
       this.persistAll();
       return true;
     },
-    /** HRBP 校准：pl_approved → calibrated（待归档） */
+    /**
+     * 团队整批驳回：驳回同一 RM、同一周期、同一审批步骤的所有 in_approval 评审。
+     * 调整一个人的绩效往往需要重新平衡整个团队，因此整批回退。
+     * @returns {{ ok: boolean, count: number, rmName: string }}
+     */
+    rejectTeamPerformanceReviews(reviewId, actorEmployeeId, note) {
+      const TM = window.TM;
+      const anchor = this.performanceReviews.find((x) => x.id === reviewId);
+      if (!anchor || anchor.status !== 'in_approval') return { ok: false, count: 0, rmName: '' };
+
+      const rmId = Number(anchor.reviewerId);
+      const cycleId = anchor.cycleId;
+      const pendingId = Number(anchor.pendingApproverId);
+      const actorId = Number(actorEmployeeId);
+
+      const auth = TM.useAuthStore?.();
+      const isHrbp = !!(auth && (auth.isHrbp || auth.isSuperAdmin));
+      const canAct = actorId === pendingId
+        || (typeof TM.isManagerOf === 'function' && TM.isManagerOf(this, actorId, pendingId))
+        || isHrbp;
+      if (!canAct) return { ok: false, count: 0, rmName: '' };
+
+      const siblings = this.performanceReviews.filter((r) =>
+        r.cycleId === cycleId
+        && Number(r.reviewerId) === rmId
+        && r.status === 'in_approval'
+        && Number(r.pendingApproverId) === pendingId,
+      );
+      if (!siblings.length) return { ok: false, count: 0, rmName: '' };
+
+      const today = new Date().toISOString().slice(0, 10);
+      const proxyNote = actorId !== pendingId ? `（由 ${this._empMap.get(actorId)?.name || actorId} 代驳回）` : '';
+      const noteStr = String(note || '').trim() + proxyNote;
+      let count = 0;
+
+      siblings.forEach((r) => {
+        const i = this.performanceReviews.indexOf(r);
+        if (i < 0) return;
+        const chain = r.approvalChain || [];
+        const idx = chain.indexOf(pendingId);
+        if (idx < 0) return;
+        const log = [...(r.approvalLog || []), {
+          approverId: actorId, at: today, action: 'reject',
+          note: noteStr + `（整批驳回 ${siblings.length} 人）`,
+        }];
+        if (idx > 0) {
+          const prev = chain[idx - 1];
+          this.performanceReviews[i] = {
+            ...r, status: 'in_approval', approvalStepIndex: idx - 1,
+            pendingApproverId: prev, approvalLog: log, levelApprovedBy: null,
+          };
+        } else {
+          this.performanceReviews[i] = {
+            ...r, status: 'rm_pending', approvalStepIndex: 0,
+            pendingApproverId: r.reviewerId, approvalLog: log, finalGrade: '', levelApprovedBy: null,
+          };
+        }
+        count++;
+      });
+
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      const rmName = this._empMap.get(rmId)?.name || String(rmId);
+      return { ok: count > 0, count, rmName };
+    },
+    /** HRBP 批量校准：pl_pending → calibrated */
     hrbpCalibrateReview(reviewId, grade, actorId) {
       const grades = window.TM.PERF_GRADE_OPTIONS;
       const g = String(grade || '').trim();
       if (!grades.includes(g)) return false;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
-      if (this.performanceReviews[i].status !== 'pl_approved') return false;
+      if (this.performanceReviews[i].status !== 'pl_pending') return false;
       const today = new Date().toISOString().slice(0, 10);
       const log = [...(this.performanceReviews[i].approvalLog || []), {
         approverId: actorId || null, at: today, action: 'calibrate', note: 'HRBP 校准确认',
@@ -1106,24 +1378,51 @@ window.TM.useDataStore = defineStore('data', {
       this.persistAll();
       return true;
     },
-    /** 归档：当前周期所有评估均已校准时，批量归档并同步九宫格 */
+    /** 产品线负责人批量审批：calibrated → pl_approved；可传 reviewIds 限定范围 */
+    plOwnerApproveReviews(cycleId, actorId, reviewIds) {
+      const idSet = Array.isArray(reviewIds) && reviewIds.length ? new Set(reviewIds) : null;
+      const reviews = this.performanceReviews.filter((r) => {
+        if (r.cycleId !== cycleId || r.status !== 'calibrated') return false;
+        return idSet ? idSet.has(r.id) : true;
+      });
+      if (!reviews.length) return 0;
+      const today = new Date().toISOString().slice(0, 10);
+      let count = 0;
+      reviews.forEach((r) => {
+        const idx = this.performanceReviews.indexOf(r);
+        if (idx < 0) return;
+        const log = [...(r.approvalLog || []), {
+          approverId: actorId || null, at: today, action: 'pl_approve', note: '产品线负责人审批通过',
+        }];
+        this.performanceReviews[idx] = {
+          ...r, status: 'pl_approved', _newFlowPlApproved: true, approvalLog: log,
+        };
+        count++;
+      });
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return count;
+    },
+    /** 归档：当前周期所有评估均已产品线审批后，批量归档并同步九宫格；返回归档条数 */
     archiveCycleReviews(cycleId) {
       const reviews = this.performanceReviews.filter((r) => r.cycleId === cycleId);
-      if (!reviews.length) return false;
-      const allCalibrated = reviews.every((r) => r.status === 'calibrated' || r.status === 'finalized');
-      if (!allCalibrated) return false;
+      if (!reviews.length) return 0;
+      const allReady = reviews.every((r) => r.status === 'pl_approved' || r.status === 'finalized');
+      if (!allReady) return 0;
       const today = new Date().toISOString().slice(0, 10);
+      let archived = 0;
       reviews.forEach((r) => {
-        if (r.status !== 'calibrated') return;
+        if (r.status !== 'pl_approved') return;
         const idx = this.performanceReviews.indexOf(r);
         if (idx < 0) return;
         const log = [...(r.approvalLog || []), { approverId: null, at: today, action: 'archive', note: '产品线归档' }];
         this.performanceReviews[idx] = { ...r, status: 'finalized', approvalLog: log };
         this._syncTalentPerfRating(r.employeeId);
+        archived++;
       });
       this._markDirty('performanceReviews', 'talentMatrix');
       this.persistAll();
-      return true;
+      return archived;
     },
     /** 记录沟通 */
     recordCommunication(reviewId, notes) {
@@ -1144,15 +1443,17 @@ window.TM.useDataStore = defineStore('data', {
       this.persistAll();
       return true;
     },
-    /** 校准阶段可调整等级；归档（finalized）后等级锁定，任何人不可改 */
+    /** HRBP 可在评估产生后至归档前任意阶段调整等级；finalized 后锁定 */
     hrbpAdjustFinalGrade(reviewId, grade) {
       const grades = window.TM.PERF_GRADE_OPTIONS;
       const g = String(grade || '').trim();
       if (!grades.includes(g)) return false;
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
-      if (this.performanceReviews[i].status !== 'calibrated') return false;
-      this.performanceReviews[i] = { ...this.performanceReviews[i], finalGrade: g };
+      const r = this.performanceReviews[i];
+      if (r.status === 'finalized' || r.status === 'rm_pending') return false;
+      const field = (r.status === 'rm_evaluated' || r.status === 'in_approval') ? 'rmInitialGrade' : 'finalGrade';
+      this.performanceReviews[i] = { ...r, [field]: g };
       this._markDirty('performanceReviews');
       this.persistAll();
       return true;
@@ -1384,9 +1685,47 @@ window.TM.useDataStore = defineStore('data', {
       this.persistAll();
     },
     addCycle(row) {
+      const TM = window.TM;
       const id = uid(this.performanceCycles);
+      const cutoff = row.cutoffDate || '';
       this.performanceCycles.push({ ...row, id });
-      this._markDirty('performanceCycles');
+      const today = new Date().toISOString().slice(0, 10);
+      const activeEmps = this.employees.filter((e) => {
+        if (e.status === 'leave') return false;
+        if (cutoff && e.hireDate && String(e.hireDate) > cutoff) return false;
+        return true;
+      });
+      activeEmps.forEach((emp) => {
+        const reviewerId = emp.managerId || null;
+        const chain = reviewerId && typeof TM.buildApprovalChainAboveRm === 'function'
+          ? TM.buildApprovalChainAboveRm(this, reviewerId) : [];
+        this.performanceReviews.push({
+          id: uid(this.performanceReviews),
+          employeeId: emp.id,
+          reviewerId,
+          cycleId: id,
+          status: 'rm_pending',
+          rmInitialGrade: '',
+          finalGrade: '',
+          approvalChain: chain,
+          approvalStepIndex: 0,
+          pendingApproverId: reviewerId,
+          approvalLog: [],
+          historyPerformance: '',
+          outputDescription: '',
+          prevCycleAvgHours: null,
+          comments: '',
+          devAdvice: '',
+          rmComment: '',
+          createdAt: today,
+          communicationNotes: '',
+          communicatedAt: null,
+          appealDeadline: null,
+          calibratedBy: null,
+          calibratedAt: null,
+        });
+      });
+      this._markDirty('performanceCycles', 'performanceReviews');
       this.persistAll();
       return id;
     },
@@ -1495,7 +1834,6 @@ window.TM.useDataStore = defineStore('data', {
           return;
         }
         if (k === 'users') {
-          this[k] = normalizeUsersWithDemoEmails(obj[k]).users;
           return;
         }
         if (k === 'orgSettings') {

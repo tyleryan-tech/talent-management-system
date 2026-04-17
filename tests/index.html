@@ -8,14 +8,22 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
-    h1 { color: #00d4aa; margin-bottom: 1rem; }
-    #output { background: #16213e; border-radius: 8px; padding: 1.5rem; font-family: 'Consolas', monospace; font-size: 14px; line-height: 1.8; white-space: pre-wrap; max-height: 80vh; overflow-y: auto; }
+    h1 { color: #00d4aa; margin-bottom: .5rem; }
+    .subtitle { color: #64748b; font-size: 14px; margin-bottom: 1rem; }
+    #status-bar { padding: 10px 16px; border-radius: 8px; font-weight: bold; font-size: 15px; margin-bottom: 1rem; display: none; }
+    #status-bar.pass { background: #0d3320; color: #00d4aa; display: block; }
+    #status-bar.fail { background: #3d1212; color: #ff6b6b; display: block; }
+    #status-bar.running { background: #1e3a5f; color: #74b9ff; display: block; }
+    #output { background: #16213e; border-radius: 8px; padding: 1.5rem; font-family: 'Consolas', monospace; font-size: 14px; line-height: 1.8; white-space: pre-wrap; max-height: 75vh; overflow-y: auto; }
     .passed { color: #00d4aa; }
     .failed { color: #ff6b6b; }
+    .skipped { color: #ffa502; }
     .suite { color: #74b9ff; font-weight: bold; }
     .summary { color: #ffd93d; font-size: 16px; font-weight: bold; margin-top: 1rem; }
-    button { background: #00d4aa; color: #1a1a2e; border: none; padding: 0.6rem 1.5rem; border-radius: 6px; font-size: 14px; cursor: pointer; margin-bottom: 1rem; }
+    .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 1rem; }
+    button { background: #00d4aa; color: #1a1a2e; border: none; padding: 0.6rem 1.5rem; border-radius: 6px; font-size: 14px; cursor: pointer; }
     button:hover { background: #00b894; }
+    label.auto { color: #94a3b8; font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer; }
   </style>
   <!-- Vue / Router / Pinia -->
   <script src="https://unpkg.com/vue@3.4.27/dist/vue.global.prod.js"></script>
@@ -26,7 +34,12 @@
 </head>
 <body>
   <h1>Talent Hub Test Runner</h1>
-  <button onclick="runTests()">Run All Tests</button>
+  <p class="subtitle">三层测试：Store 逻辑 → Computed 视图 → Smoke 端到端</p>
+  <div class="controls">
+    <button onclick="runTests()">Run All Tests</button>
+    <label class="auto"><input type="checkbox" id="autorun" checked /> 页面加载后自动运行</label>
+  </div>
+  <div id="status-bar"></div>
   <div id="output">Click "Run All Tests" to start...</div>
 
   <!-- Core app scripts (needed for stores) -->
@@ -55,11 +68,23 @@
 
   <!-- Test framework -->
   <script src="test-runner.js"></script>
-  <!-- Test suites -->
+
+  <!-- Original suites -->
   <script src="test-employee-crud.js"></script>
   <script src="test-performance-workflow.js"></script>
   <script src="test-organization.js"></script>
   <script src="test-data-sync.js"></script>
+
+  <!-- New: Data consistency & regression -->
+  <script src="test-data-consistency.js"></script>
+  <script src="test-product-line-switch.js"></script>
+  <script src="test-team-reject.js"></script>
+
+  <!-- New: View computed layer -->
+  <script src="test-view-computed.js"></script>
+
+  <!-- New: Smoke end-to-end -->
+  <script src="test-smoke.js"></script>
 
   <script>
     // Initialize Pinia + stores for testing
@@ -75,24 +100,63 @@
     if (lineId && !TM.lineHasEmployeeStorage(lineId)) {
       TM.seedAllData(lineId);
     }
+
+    // Ensure >=2 product lines so Product Line Switch tests can actually run
+    if (plStore.lines.length < 2) {
+      const maxId = plStore.lines.reduce(function (m, l) { return Math.max(m, l.id); }, 0);
+      const secondId = maxId + 1;
+      plStore.lines.push({ id: secondId, name: 'Test Line 2', createdAt: new Date().toISOString().slice(0, 10) });
+      plStore.persistRegistry();
+      if (!TM.lineHasEmployeeStorage(secondId)) {
+        TM.seedAllData(secondId);
+      }
+    }
+
     TM.useDataStore().hydrate();
     TM.useAuthStore().restoreSession();
 
     async function runTests() {
       const output = document.getElementById('output');
+      const statusBar = document.getElementById('status-bar');
       const lines = [];
+
+      statusBar.className = 'running';
+      statusBar.textContent = '⏳ 测试运行中…';
+      document.title = '⏳ Running… — Test Runner';
+
       const log = (msg) => {
         lines.push(msg);
         let html = lines.join('\n')
           .replace(/📋\s*(.+)/g, '<span class="suite">📋 $1</span>')
           .replace(/✅\s*(.+)/g, '<span class="passed">  ✅ $1</span>')
           .replace(/❌\s*(.+)/g, '<span class="failed">  ❌ $1</span>')
+          .replace(/⏭️\s*(.+)/g, '<span class="skipped">  ⏭️ $1</span>')
           .replace(/📊\s*(.+)/g, '<span class="summary">📊 $1</span>');
         output.innerHTML = html;
+        output.scrollTop = output.scrollHeight;
       };
+
       const results = await TM._testRunner.runAll({ log });
+
+      if (results.failed > 0) {
+        statusBar.className = 'fail';
+        statusBar.textContent = '❌ ' + results.failed + ' FAILED | ' + results.passed + ' passed | ' + results.skipped + ' skipped';
+        document.title = '❌ ' + results.failed + ' FAILED — Test Runner';
+      } else {
+        statusBar.className = 'pass';
+        statusBar.textContent = '✅ ALL ' + results.passed + ' PASSED | ' + results.skipped + ' skipped';
+        document.title = '✅ ALL PASSED — Test Runner';
+      }
+
       return results;
     }
+
+    // Auto-run on page load
+    window.addEventListener('load', function () {
+      if (document.getElementById('autorun').checked) {
+        setTimeout(runTests, 300);
+      }
+    });
   </script>
 </body>
 </html>

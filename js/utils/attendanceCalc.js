@@ -176,10 +176,11 @@
     if (val == null) return '';
     const v = Number(val);
     if (Number.isNaN(v)) return '';
-    if (v < 9.5) return 'hours-t1';
-    if (v < 10) return 'hours-t2';
-    if (v < 10.5) return '';
-    if (v < 11) return 'hours-t4';
+    const T = (w.TM.THRESHOLDS && w.TM.THRESHOLDS.ATTENDANCE_HOURS) || { DEEP_RED: 9.5, LIGHT_RED: 10, NEUTRAL_MAX: 10.5, LIGHT_GREEN: 11 };
+    if (v < T.DEEP_RED) return 'hours-t1';
+    if (v < T.LIGHT_RED) return 'hours-t2';
+    if (v < T.NEUTRAL_MAX) return '';
+    if (v < T.LIGHT_GREEN) return 'hours-t4';
     return 'hours-t5';
   }
 

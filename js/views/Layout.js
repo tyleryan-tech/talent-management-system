@@ -11,37 +11,33 @@
       <aside class="sidebar">
         <div class="sidebar-head">
           <div class="logo-dot sm"></div>
-          <span class="brand">Talent Hub</span>
+          <span class="brand">人才管理</span>
           <button type="button" class="icon-btn nav-toggle" @click="navCollapsed = !navCollapsed" aria-label="Toggle menu">
             <i class="fa-solid fa-bars"></i>
           </button>
         </div>
-        <div class="sidebar-product-lines">
-          <div class="muted small product-line-label">Product line</div>
-          <select
-            class="product-line-select"
-            :value="productLine.currentLineId"
-            title="Switch product line (isolated data)"
-            @change="onProductLineChange($event)"
-          >
-            <option v-for="l in productLine.lines" :key="l.id" :value="l.id">{{ l.name }}</option>
-          </select>
-          <button v-if="auth.isHrbp" type="button" class="btn product-line-new-btn" @click="openLineModal">
-            <i class="fa-solid fa-plus fa-fw"></i><span class="product-line-new-txt">New product line</span>
-          </button>
-          <button
-            v-if="auth.isHrbp && productLine.lines.length > 1"
-            type="button"
-            class="btn product-line-remove-btn"
-            title="删除当前选中的产品线（不可恢复）"
-            @click="confirmRemoveProductLine"
-          >
-            <i class="fa-solid fa-trash-can fa-fw"></i><span class="product-line-remove-txt">移除产品线</span>
-          </button>
-        </div>
-        <div v-if="hasDualAccess" class="sidebar-zone-switch">
+        <div v-if="hasDualAccess || isInAdminZone || isSuperAdmin" class="sidebar-zone-switch">
           <button type="button" class="zone-btn" :class="{ active: isInHrbpZone }" @click="$router.push('/hrbp/dashboard')"><i class="fa-solid fa-user-shield fa-fw"></i> HRBP</button>
-          <button type="button" class="zone-btn" :class="{ active: !isInHrbpZone }" @click="$router.push('/manager/dashboard')"><i class="fa-solid fa-people-group fa-fw"></i> Manager</button>
+          <button v-if="canAccessMgr" type="button" class="zone-btn" :class="{ active: isInMgrZone }" @click="$router.push('/manager/dashboard')"><i class="fa-solid fa-people-group fa-fw"></i> Manager</button>
+          <template v-if="isSuperAdmin">
+            <button type="button" class="zone-btn" :class="{ active: isInAdminZone }" @click="$router.push('/admin/users')"><i class="fa-solid fa-shield-halved fa-fw"></i> 管理</button>
+          </template>
+        </div>
+        <div class="sidebar-product-lines" v-if="showProductLineSection && !isInAdminZone">
+          <div class="muted small product-line-label">Product line</div>
+          <template v-if="productLine.canSwitchLine || isSuperAdmin">
+            <select
+              class="product-line-select"
+              :value="productLine.currentLineId"
+              title="切换产品线"
+              @change="onProductLineChange($event)"
+            >
+              <option v-for="l in productLine.accessibleLines" :key="l.id" :value="l.id">{{ l.name }}</option>
+            </select>
+          </template>
+          <template v-else>
+            <div class="product-line-select" style="padding:6px 10px;font-size:0.85rem;color:var(--text)">{{ productLine.currentLine?.name || '—' }}</div>
+          </template>
         </div>
         <nav class="side-nav">
           <router-link
@@ -64,29 +60,17 @@
             <span class="muted topbar-user" v-if="productLine.currentLine">Product line: {{ productLine.currentLine.name }}</span>
           </div>
           <div class="topbar-actions">
-            <router-link to="/profile" class="btn btn-ghost btn-sm"><i class="fa-regular fa-user"></i> Profile</router-link>
-            <button type="button" class="btn btn-ghost btn-sm" @click="logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out</button>
+            <router-link to="/profile" class="btn btn-ghost btn-sm"><i class="fa-regular fa-user"></i> 个人设置</router-link>
+            <button type="button" class="btn btn-ghost btn-sm" @click="logout"><i class="fa-solid fa-arrow-right-from-bracket"></i> 退出登录</button>
           </div>
         </header>
         <main class="page-content">
           <router-view :key="routerViewKey" />
         </main>
       </div>
-      <div v-if="lineModalOpen" class="modal-backdrop" @click.self="lineModalOpen = false">
-        <div class="modal card" style="max-width:420px">
-          <h3>New product line</h3>
-          <p class="muted small">Creates an isolated workspace (employees, org, attendance, performance, etc.). Seeds the same demo data as first launch, including roster. Demo accounts hrbp / manager (password 123) with Staff IDs bound to demo employees.</p>
-          <label class="field" style="margin-top:1rem">
-            <span>Product line name</span>
-            <input v-model.trim="newLineName" class="input" placeholder="e.g. Cloud BU" @keyup.enter="submitNewLine" />
-          </label>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-ghost" @click="lineModalOpen = false">Cancel</button>
-            <button type="button" class="btn btn-primary" @click="submitNewLine">Create</button>
-          </div>
-        </div>
-      </div>
-      <div v-if="toast.message" :class="['toast', toast.type]">{{ toast.message }}</div>
+      
+      <div v-if="toast.message" :class="['toast', toast.type]" role="status" aria-live="polite">{{ toast.message }}</div>
+      <div v-if="globalLoading" class="global-loading-bar"><div class="global-loading-bar-inner"></div></div>
     </div>
   `,
   setup() {
@@ -97,17 +81,16 @@
 
     const roleLabel = computed(() => {
       if (!auth.currentUser) return '';
+      if (auth.isProductLineOwner) return '产品线负责人';
       const sub = auth.effectiveSubType;
       if (sub === 'super_admin') return 'Super Admin';
       if (sub === 'admin') return 'HRBP 管理员';
       if (sub === 'intern') return 'HRBP 实习生';
-      if (auth.isProductLineOwner) return '产品线负责人';
-      return auth.isHrbp ? 'HRBP' : 'Reporting Manager';
+      return auth.isHrbp ? 'HRBP' : '汇报经理';
     });
     const navCollapsed = ref(false);
-    const lineModalOpen = ref(false);
-    const newLineName = ref('');
     const toast = ref({ message: '', type: 'info' });
+    const globalLoading = ref(false);
     let toastTimer;
 
     function showToast(e) {
@@ -115,20 +98,25 @@
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => { toast.value = { message: '', type: 'info' }; }, 4200);
     }
+    function onLoading(e) { globalLoading.value = !!e.detail?.loading; }
 
-    onMounted(() => window.addEventListener('tm-toast', showToast));
-    onUnmounted(() => window.removeEventListener('tm-toast', showToast));
+    onMounted(() => { window.addEventListener('tm-toast', showToast); window.addEventListener('tm-loading', onLoading); });
+    onUnmounted(() => { window.removeEventListener('tm-toast', showToast); window.removeEventListener('tm-loading', onLoading); });
 
     const allHrbpMenuItems = [
-      { to: '/hrbp/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
-      { to: '/hrbp/roster', label: 'Roster', icon: 'fa-solid fa-users', module: 'roster' },
-      { to: '/hrbp/org', label: 'Organization', icon: 'fa-solid fa-sitemap', module: 'org' },
-      { to: '/hrbp/recruitment', label: 'Recruiting', icon: 'fa-solid fa-user-plus', module: 'recruitment' },
-      { to: '/hrbp/talent', label: 'Talent review', icon: 'fa-solid fa-chess-board', module: 'talent' },
-      { to: '/hrbp/performance', label: 'Performance', icon: 'fa-solid fa-chart-line', module: 'performance' },
-      { to: '/hrbp/attendance', label: 'Attendance', icon: 'fa-solid fa-clock', module: 'attendance' },
-      { to: '/hrbp/users', label: '用户管理', icon: 'fa-solid fa-user-shield', superAdminOnly: true },
+      { to: '/hrbp/dashboard', label: '仪表盘', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
+      { to: '/hrbp/roster', label: '花名册', icon: 'fa-solid fa-users', module: 'roster' },
+      { to: '/hrbp/org', label: '组织管理', icon: 'fa-solid fa-sitemap', module: 'org' },
+      { to: '/hrbp/recruitment', label: '招聘管理', icon: 'fa-solid fa-user-plus', module: 'recruitment' },
+      { to: '/hrbp/talent', label: '人才盘点', icon: 'fa-solid fa-chess-board', module: 'talent' },
+      { to: '/hrbp/performance', label: '绩效管理', icon: 'fa-solid fa-chart-line', module: 'performance' },
+      { to: '/hrbp/attendance', label: '考勤管理', icon: 'fa-solid fa-clock', module: 'attendance' },
     ];
+    const allAdminMenuItems = [
+      { to: '/admin/users', label: '用户管理', icon: 'fa-solid fa-user-shield' },
+      { to: '/admin/product-lines', label: '产品线管理', icon: 'fa-solid fa-layer-group' },
+    ];
+    const adminMenu = computed(() => allAdminMenuItems);
     const hrbpMenu = computed(() => {
       return allHrbpMenuItems.filter((item) => {
         if (item.superAdminOnly) return auth.effectiveSubType === 'super_admin';
@@ -138,23 +126,34 @@
     });
 
     const allMgrMenuItems = [
-      { to: '/manager/dashboard', label: 'Dashboard', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
+      { to: '/manager/dashboard', label: '仪表盘', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
       { to: '/manager/roster', label: '花名册', icon: 'fa-solid fa-people-group', module: 'roster' },
       { to: '/manager/org', label: '组织管理', icon: 'fa-solid fa-sitemap', module: 'org' },
       { to: '/manager/recruitment', label: '招聘管理', icon: 'fa-solid fa-user-plus', module: 'recruitment' },
       { to: '/manager/talent', label: '人才盘点', icon: 'fa-solid fa-chess-board', module: 'talent' },
-      { to: '/manager/performance', label: 'Performance', icon: 'fa-solid fa-clipboard-check', module: 'performance' },
-      { to: '/manager/attendance', label: '考勤', icon: 'fa-solid fa-clock', module: 'attendance' },
+      { to: '/manager/performance', label: '绩效管理', icon: 'fa-solid fa-clipboard-check', module: 'performance' },
+      { to: '/manager/attendance', label: '考勤管理', icon: 'fa-solid fa-clock', module: 'attendance' },
     ];
     const mgrMenu = computed(() =>
       allMgrMenuItems.filter((item) => auth.canAccessModule(item.module)),
     );
 
+    const isSuperAdmin = computed(() => auth.effectiveSubType === 'super_admin');
+    const showProductLineSection = computed(() => {
+      if (isSuperAdmin.value) return true;
+      return productLine.canSwitchLine;
+    });
+
     const canAccessHrbp = computed(() => auth.isHrbp || auth.isSuperAdmin || auth.isProductLineOwner);
     const canAccessMgr = computed(() => auth.isManager);
     const hasDualAccess = computed(() => canAccessHrbp.value && canAccessMgr.value);
 
+    const isInAdminZone = computed(() => r.path.startsWith('/admin'));
+    const isInHrbpZone = computed(() => r.path.startsWith('/hrbp'));
+    const isInMgrZone = computed(() => r.path.startsWith('/manager'));
+
     const menu = computed(() => {
+      if (r.path.startsWith('/admin')) return adminMenu.value;
       if (r.path.startsWith('/profile')) {
         return canAccessHrbp.value ? hrbpMenu.value : mgrMenu.value;
       }
@@ -164,11 +163,13 @@
 
     const pageTitle = computed(() => {
       const m = r.matched.find((x) => x.meta?.title);
-      return m?.meta?.title || (auth.isHrbp ? 'HRBP workspace' : 'Manager workspace');
+      return m?.meta?.title || (auth.isHrbp ? 'HRBP 工作台' : '经理工作台');
     });
 
-    const isInHrbpZone = computed(() => r.path.startsWith('/hrbp'));
-    const routerViewKey = computed(() => `${productLine.currentLineId ?? 0}-${r.fullPath}`);
+    const routerViewKey = computed(() => {
+      if (r.path.startsWith('/admin')) return 'admin-' + r.fullPath;
+      return (productLine.currentLineId ?? 0) + '-' + r.fullPath;
+    });
 
     async function onProductLineChange(ev) {
       const id = Number(ev.target.value);
@@ -179,29 +180,6 @@
       }
     }
 
-    function openLineModal() {
-      newLineName.value = '';
-      lineModalOpen.value = true;
-    }
-
-    async function submitNewLine() {
-      const ok = await productLine.createLine(newLineName.value);
-      if (ok) {
-        lineModalOpen.value = false;
-        newLineName.value = '';
-      }
-    }
-
-    async function confirmRemoveProductLine() {
-      if (!auth.isHrbp || productLine.lines.length <= 1) return;
-      const cur = productLine.currentLine;
-      const name = cur?.name || String(productLine.currentLineId);
-      if (!window.confirm(
-        `确定移除产品线「${name}」？\n\n该产品线下的员工、组织、考勤、绩效等数据将被永久删除（含浏览器本地与服务端）。此操作不可撤销。`,
-      )) return;
-      await productLine.removeLine(productLine.currentLineId);
-    }
-
     function logout() {
       auth.logout();
       auth.persistSession();
@@ -209,11 +187,11 @@
     }
 
     return {
-      menu, pageTitle, logout, navCollapsed, toast, auth,
+      menu, pageTitle, logout, navCollapsed, toast, globalLoading, auth,
       productLine, routerViewKey, onProductLineChange,
-      lineModalOpen, newLineName, openLineModal, submitNewLine,
-      roleLabel, confirmRemoveProductLine,
-      hasDualAccess, isInHrbpZone,
+      roleLabel, canAccessMgr,
+      hasDualAccess, isInHrbpZone, isInMgrZone, isInAdminZone,
+      isSuperAdmin, showProductLineSection,
     };
   },
 };

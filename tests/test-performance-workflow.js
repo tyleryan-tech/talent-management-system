@@ -23,9 +23,9 @@
       assert.equal(data.performanceReviews.length, before + 1);
     });
 
-    it('should update a performance review', function () {
+    it('should update a performance review', function (assert, skip) {
       const review = data.performanceReviews.find((r) => r.employeeId === 1001 && r.status === 'rm_pending');
-      if (!review) return;
+      if (!review) skip('no rm_pending review for employee 1001');
       data.updateReview(review.id, { proposedGrade: 'B+' });
       const updated = data.performanceReviews.find((r) => r.id === review.id);
       assert.equal(updated.proposedGrade, 'B+');

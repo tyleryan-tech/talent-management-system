@@ -59,16 +59,39 @@
           </div>
         </div>
 
+        <!-- PLO batch approve bar -->
+        <div class="card pad" v-if="isPlOwner && plApproveCount > 0" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <strong>产品线审批</strong>:
+            <span class="tag tag-ok">{{ plApproveCount }} 条已校准评估待审批</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" @click="plOwnerBatchApprove">
+            <i class="fa-solid fa-check-double"></i> 批量审批 ({{ plApproveCount }})
+          </button>
+        </div>
+
+        <!-- Batch submit bar -->
+        <div class="card pad" v-if="myEvaluatedCount > 0 || myPendingEvalCount > 0" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <strong>我的直属评估</strong>:
+            <span class="tag tag-ok" v-if="myPendingEvalCount === 0">全部已评估 ({{ myEvaluatedCount }})</span>
+            <span class="tag tag-warn" v-else>{{ myEvaluatedCount }} 已评估 / {{ myPendingEvalCount }} 待评估</span>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" :disabled="!canBatchSubmit" @click="doBatchSubmit">
+            <i class="fa-solid fa-paper-plane"></i> 批量提交审批 ({{ myEvaluatedCount }})
+          </button>
+          <span v-if="!canBatchSubmit && myPendingEvalCount > 0" class="muted small" style="color:#e67700">
+            <i class="fa-solid fa-triangle-exclamation"></i> 请先完成所有直属员工的评估
+          </span>
+          <span v-if="!canBatchSubmit && myPendingEvalCount === 0 && pendingSubApprovalCount > 0" class="muted small" style="color:#e67700">
+            <i class="fa-solid fa-triangle-exclamation"></i> 还有 {{ pendingSubApprovalCount }} 条下级评审待您审批
+          </span>
+        </div>
+
         <!-- Pending tasks (my own) -->
         <div class="card pad" v-if="todoList.length">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
             <h3 class="section-title" style="margin:0">我的待办 <span class="perf-badge">{{ todoList.length }}</span></h3>
-            <button v-if="batchApproveCount && canApproveAll && auth.hasPermission('perf.approve')" type="button" class="btn btn-primary btn-xs" @click="batchApprove">
-              <i class="fa-solid fa-check-double"></i> 一键审批 ({{ batchApproveCount }})
-            </button>
-            <span v-if="batchApproveCount && !canApproveAll" class="muted small" style="color:#e67700">
-              <i class="fa-solid fa-triangle-exclamation"></i> 下级团队尚有未完成的评估/审批，暂不可提交上级
-            </span>
           </div>
           <table class="data-table compact">
             <thead><tr><th>员工</th><th>当前等级</th><th>绩效评语</th><th>任务类型</th><th></th></tr></thead>
@@ -80,8 +103,7 @@
                 <td>{{ todoKind(r) }}</td>
                 <td>
                   <button v-if="r.status==='rm_pending' && auth.hasPermission('perf.evaluate')" type="button" class="btn btn-primary btn-xs" @click="openTask(r)">评估</button>
-                  <button v-if="r.status==='in_approval' && canApproveAll && auth.hasPermission('perf.approve')" type="button" class="btn btn-primary btn-xs" @click="openTask(r)">审批</button>
-                  <button v-if="r.status==='in_approval' && !canApproveAll" type="button" class="btn btn-ghost btn-xs" disabled title="下级团队尚有未完成任务">审批</button>
+                  <button v-if="r.status==='in_approval' && auth.hasPermission('perf.approve')" type="button" class="btn btn-primary btn-xs" @click="openTask(r)">审批</button>
                 </td>
               </tr>
             </tbody>
@@ -132,7 +154,7 @@
                   <td>{{ r.rmInitialGrade || '—' }}</td>
                   <td class="cell-clip" style="max-width:160px" :title="r.rmComment||''">{{ r.rmComment || '—' }}</td>
                   <td><span class="tag" :class="'perf-st-'+r.status">{{ statusLabel(r.status) }}</span></td>
-                  <td><strong>{{ (r.status==='calibrated'||r.status==='finalized') ? (r.finalGrade||'—') : '—' }}</strong></td>
+                  <td><strong>{{ displayFinalGrade(r) }}</strong></td>
                 </tr>
               </tbody>
             </table>
@@ -160,7 +182,7 @@
                   <td>{{ empName(r.reviewerId) }}</td>
                   <td>{{ cycleLabel(r) }}</td>
                   <td>{{ r.rmInitialGrade || '—' }}</td>
-                  <td><strong>{{ (r.status==='calibrated'||r.status==='finalized') ? (r.finalGrade||'—') : '—' }}</strong></td>
+                  <td><strong>{{ displayFinalGrade(r) }}</strong></td>
                   <td><span class="tag" :class="'perf-st-'+r.status">{{ statusLabel(r.status) }}</span></td>
                 </tr>
               </tbody>
@@ -173,16 +195,27 @@
       <template v-if="tab==='communication'">
         <div class="card pad">
           <h3 class="section-title">绩效沟通</h3>
-          <p class="muted small">已归档的直属下级绩效，可记录沟通内容。</p>
+          <div class="flex-row gap-md" style="margin-bottom:12px;">
+            <label class="muted small" style="display:flex;align-items:center;gap:6px;">周期：
+              <select v-model="commCycleId" class="input input-sm" style="width:200px;">
+                <option :value="null">当前周期</option>
+                <option v-for="c in commCycleOptions" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted small">已审批/已归档的团队绩效沟通进度（直属下级可记录沟通内容，子团队成员可查看状态）。</p>
           <table class="data-table compact">
-            <thead><tr><th>员工</th><th>周期</th><th>最终等级</th><th>沟通状态</th><th></th></tr></thead>
+            <thead><tr><th>员工</th><th>RM</th><th>周期</th><th>最终等级</th><th>沟通状态</th><th></th></tr></thead>
             <tbody>
               <tr v-for="r in commDirectList" :key="r.id">
                 <td>{{ empName(r.employeeId) }}</td>
+                <td>{{ empName(r.reviewerId) }}</td>
                 <td>{{ cycleLabel(r) }}</td>
                 <td><strong>{{ r.finalGrade || '—' }}</strong></td>
                 <td>{{ r.communicatedAt ? '已沟通 ('+r.communicatedAt+')' : '未沟通' }}</td>
-                <td><button v-if="auth.hasPermission('perf.communicate')" type="button" class="btn-link" @click="openCommTask(r)">{{ r.communicatedAt ? '编辑' : '沟通' }}</button></td>
+                <td>
+                  <button v-if="isMyDirectReport(r.employeeId) && auth.hasPermission('perf.communicate')" type="button" class="btn-link" @click="openCommTask(r)">{{ r.communicatedAt ? '编辑' : '沟通' }}</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -211,16 +244,20 @@
             </label>
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" @click="rmModal=false">取消</button>
-              <button type="submit" class="btn btn-primary">提交至审批</button>
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> 保存评估</button>
             </div>
           </form>
         </div>
       </div>
 
-      <!-- ===== Approval Modal (上级审批 + 可校准等级) ===== -->
+      <!-- ===== Approval Modal ===== -->
       <div v-if="apprModal" class="modal-backdrop" @click.self="apprModal=false">
         <div class="modal card wide">
           <h3>审批 · {{ empName(apprTarget.employeeId) }}</h3>
+          <p v-if="apprTarget.approvalChain && apprTarget.approvalChain.length > 1" class="muted small" style="margin-bottom:8px;">
+            <i class="fa-solid fa-layer-group"></i>
+            多级审批链（第 {{ (apprTarget.approvalStepIndex || 0) + 1 }} / {{ apprTarget.approvalChain.length }} 级）：通过后将自动流转至下一级审批人
+          </p>
           <div class="kv-grid" style="margin-bottom:12px">
             <div><span class="muted">当前建议等级</span><div><strong>{{ apprTarget.rmInitialGrade }}</strong></div></div>
             <div><span class="muted">提交人</span><div>{{ empName(apprTarget.reviewerId) }}</div></div>
@@ -239,7 +276,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-ghost" @click="apprModal=false">取消</button>
-            <button type="button" class="btn btn-secondary" @click="doReject"><i class="fa-solid fa-arrow-rotate-left"></i> 驳回至下级</button>
+            <button type="button" class="btn btn-secondary" @click="doReject"><i class="fa-solid fa-arrow-rotate-left"></i> 整批驳回</button>
             <button type="button" class="btn btn-primary" @click="doApprove"><i class="fa-solid fa-check"></i> 通过</button>
           </div>
         </div>
@@ -264,7 +301,7 @@
             </label>
             <div class="modal-actions">
               <button type="button" class="btn btn-ghost" @click="proxyEvalModal=false">取消</button>
-              <button type="submit" class="btn btn-primary">提交至审批</button>
+              <button type="submit" class="btn btn-primary"><i class="fa-solid fa-save"></i> 保存评估</button>
             </div>
           </form>
         </div>
@@ -329,12 +366,16 @@
       const currentCycle = computed(() => allCycles.value.find((c) => c.status === 'open') || allCycles.value[0] || null);
 
       const subtreeIds = computed(() => me.value ? TM.collectSubtreeEmployeeIds(data, me.value) : new Set());
-      const directIds = computed(() => new Set(data.employees.filter((e) => e.managerId === me.value).map((e) => e.id)));
+      const directIds = computed(() => new Set(data.employees.filter((e) => e.managerId === me.value && e.status !== 'leave').map((e) => e.id)));
 
       function empName(id) { return data._empMap.get(id)?.name || id; }
       function cycleLabel(r) { return TM.reviewCycleLabel(data, r); }
       function cycleTypeLabel(c) { return TM.PERF_CYCLE_TYPE_LABEL[c?.cycleType] || '半年绩效'; }
       function statusLabel(s) { return TM.PERF_STATUS_LABEL[s] || s; }
+      function displayFinalGrade(r) {
+        var done = { calibrated: 1, pl_approved: 1, finalized: 1 };
+        return done[r.status] ? (r.finalGrade || '—') : '—';
+      }
 
       function todoKind(r) {
         if (r.status === 'rm_pending') return 'RM 评估';
@@ -373,22 +414,33 @@
 
       const statusCards = computed(() => {
         const rv = teamReviewsCurrentCycle.value;
-        return [
+        const cards = [
           { key: 'rm_pending', label: '待 RM 评估', count: rv.filter((r) => r.status === 'rm_pending').length },
+          { key: 'rm_evaluated', label: '已评估待提交', count: rv.filter((r) => r.status === 'rm_evaluated').length },
           { key: 'in_approval', label: '审批中', count: rv.filter((r) => r.status === 'in_approval').length },
-          { key: 'pl_approved', label: '待校准', count: rv.filter((r) => r.status === 'pl_approved').length },
+          { key: 'pl_pending', label: '待 HRBP 校准', count: rv.filter((r) => r.status === 'pl_pending').length },
           { key: 'calibrated', label: '已校准', count: rv.filter((r) => r.status === 'calibrated').length },
+          { key: 'pl_approved', label: '产品线已审批', count: rv.filter((r) => r.status === 'pl_approved').length },
           { key: 'finalized', label: '已归档', count: rv.filter((r) => r.status === 'finalized').length },
         ];
+        const rejectedCount = rv.filter((r) => r.status === 'rejected').length;
+        if (rejectedCount > 0) {
+          cards.push({ key: 'rejected', label: '已驳回', count: rejectedCount });
+        }
+        return cards;
       });
 
       const distGradeDist = computed(() => {
         const m = {};
         gradeOptions.forEach((g) => { m[g] = 0; });
         teamReviewsCurrentCycle.value
-          .filter((r) => ((r.status === 'finalized' || r.status === 'calibrated') && r.finalGrade) || (r.status !== 'rm_pending' && r.rmInitialGrade))
+          .filter((r) => {
+            var done = { finalized: 1, calibrated: 1, pl_approved: 1 };
+            return (done[r.status] && r.finalGrade) || (r.status !== 'rm_pending' && r.rmInitialGrade);
+          })
           .forEach((r) => {
-            const g = String((r.status === 'finalized' || r.status === 'calibrated') ? r.finalGrade : r.rmInitialGrade).trim();
+            var done = { finalized: 1, calibrated: 1, pl_approved: 1 };
+            const g = String(done[r.status] ? r.finalGrade : r.rmInitialGrade).trim();
             if (m[g] != null) m[g]++;
           });
         return m;
@@ -410,10 +462,7 @@
       async function drawDistChart() {
         const ec = await loadEcharts();
         if (!distChartRef.value) return;
-        if (distChart && distChart.getDom() !== distChartRef.value) {
-          distChart.dispose();
-          distChart = null;
-        }
+        if (distChart && distChart.getDom() !== distChartRef.value) { distChart.dispose(); distChart = null; }
         if (!distChart) distChart = ec.init(distChartRef.value);
         const g = distGradeDist.value;
         const total = Object.values(g).reduce((a, b) => a + b, 0);
@@ -447,31 +496,41 @@
       }
 
       let _distTimer = null;
-      function scheduleDist() {
-        if (_distTimer) clearTimeout(_distTimer);
-        _distTimer = setTimeout(() => { _distTimer = null; drawDistChart(); }, 200);
-      }
-
+      function scheduleDist() { if (_distTimer) clearTimeout(_distTimer); _distTimer = setTimeout(() => { _distTimer = null; drawDistChart(); }, 200); }
       onMounted(() => { nextTick(() => drawDistChart()); window.addEventListener('resize', scheduleDist); });
       onUnmounted(() => { distChart?.dispose(); window.removeEventListener('resize', scheduleDist); });
       watch([distGradeDist, distRoot], () => { scheduleDist(); });
       watch(tab, (v) => { if (v === 'eval') nextTick(() => drawDistChart()); });
 
-      /* ── canApproveAll: all subordinate evaluations/approvals done before I can approve ── */
-      const canApproveAll = computed(() => {
-        if (!currentCycle.value || !me.value) return true;
-        const sub = subtreeIds.value;
-        return !data.performanceReviews.some((r) => {
-          if (r.cycleId !== currentCycle.value.id) return false;
-          if (!sub.has(r.employeeId)) return false;
-          if (r.status === 'rm_pending') return true;
-          if (r.status === 'in_approval') {
-            const pa = Number(r.pendingApproverId);
-            return pa !== Number(me.value) && sub.has(pa);
-          }
-          return false;
-        });
+      /* ── Batch submit logic ── */
+      const myDirectReviewsCurrent = computed(() => {
+        if (!me.value || !currentCycle.value) return [];
+        return data.performanceReviews.filter((r) =>
+          r.cycleId === currentCycle.value.id && Number(r.reviewerId) === Number(me.value) && directIds.value.has(r.employeeId),
+        );
       });
+      const myEvaluatedCount = computed(() => myDirectReviewsCurrent.value.filter((r) => r.status === 'rm_evaluated').length);
+      const myPendingEvalCount = computed(() => myDirectReviewsCurrent.value.filter((r) => r.status === 'rm_pending').length);
+      const pendingSubApprovalCount = computed(() => {
+        if (!me.value || !currentCycle.value) return 0;
+        return data.performanceReviews.filter((r) =>
+          r.cycleId === currentCycle.value.id && r.status === 'in_approval'
+          && Number(r.pendingApproverId) === Number(me.value) && !r.levelApprovedBy,
+        ).length;
+      });
+      const canBatchSubmit = computed(() =>
+        myEvaluatedCount.value > 0 && myPendingEvalCount.value === 0 && pendingSubApprovalCount.value === 0,
+      );
+
+      function doBatchSubmit() {
+        if (!canBatchSubmit.value || !me.value || !currentCycle.value) return;
+        const n = myEvaluatedCount.value;
+        if (!confirm(`确认批量提交 ${n} 条评估至上级审批？`)) return;
+        const count = data.batchSubmitReviews(me.value, currentCycle.value.id);
+        window.dispatchEvent(new CustomEvent('tm-toast', {
+          detail: { message: `已提交 ${count} 条评估至审批`, type: count ? 'success' : 'error' },
+        }));
+      }
 
       /* ── My tasks ── */
       const todoList = computed(() => {
@@ -483,7 +542,7 @@
             && Number(r.reviewerId) === Number(m) && directIds.value.has(r.employeeId)) {
             out.push(r);
           }
-          if (r.status === 'in_approval' && Number(r.pendingApproverId) === Number(m)) {
+          if (r.status === 'in_approval' && Number(r.pendingApproverId) === Number(m) && !r.levelApprovedBy) {
             out.push(r);
           }
         });
@@ -508,41 +567,28 @@
             return false;
           });
           const emp = data._empMap.get(rm.id);
-          return {
-            rm,
-            email: emp?.email || `${rm.name}@company.com`,
-            reviews,
-            total: reviews.length,
-          };
+          return { rm, email: emp?.email || `${rm.name}@company.com`, reviews, total: reviews.length };
         }).filter((x) => x.total > 0);
       });
 
-      /* ── Urge subordinate ── */
       function urgeSubordinate(sub) {
         const today = new Date().toISOString().slice(0, 10);
         const nid = () => (data.notifications || []).reduce((m, n) => Math.max(m, n.id || 0), 0) + 1;
         const evalList = sub.reviews.filter((r) => r.status === 'rm_pending');
         const apprList = sub.reviews.filter((r) => r.status === 'in_approval');
         const lines = [];
-        if (evalList.length) {
-          lines.push(`【待评估】${evalList.length} 人: ${evalList.map((r) => empName(r.employeeId)).join('、')}`);
-        }
-        if (apprList.length) {
-          lines.push(`【待审批】${apprList.length} 人: ${apprList.map((r) => empName(r.employeeId)).join('、')}`);
-        }
+        if (evalList.length) lines.push(`【待评估】${evalList.length} 人: ${evalList.map((r) => empName(r.employeeId)).join('、')}`);
+        if (apprList.length) lines.push(`【待审批】${apprList.length} 人: ${apprList.map((r) => empName(r.employeeId)).join('、')}`);
         data.notifications.push({
-          id: nid(), employeeId: sub.rm.id,
-          title: '绩效催促',
+          id: nid(), employeeId: sub.rm.id, title: '绩效催促',
           message: `您的上级 ${empName(me.value)} 催促您尽快完成以下绩效待办：\n${lines.join('\n')}\n（催促邮件已发送至 ${sub.email}）`,
           read: false, createdAt: today,
         });
         data.persistKeys('notifications');
-        window.dispatchEvent(new CustomEvent('tm-toast', {
-          detail: { message: `催促邮件已发送至 ${sub.email}`, type: 'success' },
-        }));
+        window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: `催促邮件已发送至 ${sub.email}`, type: 'success' } }));
       }
 
-      /* ── RM Evaluation Modal ── */
+      /* ── RM Evaluation Modal (saves as rm_evaluated, not submit to chain) ── */
       const rmModal = ref(false);
       const rmTarget = ref(null);
       const rmForm = ref({ rmInitialGrade: 'B', rmComment: '', outputDescription: '', devAdvice: '' });
@@ -557,9 +603,7 @@
           rmTarget.value = r;
           rmForm.value = {
             rmInitialGrade: gradeOptions.includes(String(r.rmInitialGrade).trim()) ? String(r.rmInitialGrade).trim() : 'B',
-            rmComment: r.rmComment || '',
-            outputDescription: r.outputDescription || '',
-            devAdvice: r.devAdvice || '',
+            rmComment: r.rmComment || '', outputDescription: r.outputDescription || '', devAdvice: r.devAdvice || '',
           };
           rmModal.value = true;
           return;
@@ -576,19 +620,15 @@
         const r = rmTarget.value;
         if (!r) return;
         const payload = {
-          rmInitialGrade: rmForm.value.rmInitialGrade,
-          rmComment: rmForm.value.rmComment,
-          outputDescription: rmForm.value.outputDescription,
-          devAdvice: rmForm.value.devAdvice,
-          historyPerformance: r.historyPerformance || '',
-          prevCycleAvgHours: r.prevCycleAvgHours,
-          comments: r.comments || '',
+          rmInitialGrade: rmForm.value.rmInitialGrade, rmComment: rmForm.value.rmComment,
+          outputDescription: rmForm.value.outputDescription, devAdvice: rmForm.value.devAdvice,
+          historyPerformance: r.historyPerformance || '', prevCycleAvgHours: r.prevCycleAvgHours, comments: r.comments || '',
         };
-        if (data.submitRmPerformanceReview(r.id, payload, { actorId: me.value })) {
+        if (data.saveRmEvaluation(r.id, payload, { actorId: me.value })) {
           rmModal.value = false;
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已提交审批', type: 'success' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '评估已保存，请在全部完成后批量提交', type: 'success' } }));
         } else {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '提交失败', type: 'error' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '保存失败', type: 'error' } }));
         }
       }
 
@@ -606,37 +646,26 @@
         const chain = r.approvalChain || [];
         const pendingId = Number(r.pendingApproverId);
         const idx = chain.indexOf(pendingId);
-        const targetLabel = idx > 0
-          ? empName(chain[idx - 1])
-          : empName(r.reviewerId) + '（RM）';
-        if (!confirm(`确认驳回？将退回至「${targetLabel}」进行校准。`)) return;
-        if (data.rejectPerformanceReview(r.id, me.value, apprNote.value)) {
+        const targetLabel = idx > 0 ? empName(chain[idx - 1]) : empName(r.reviewerId) + '（RM）';
+        const teamCount = data.performanceReviews.filter((x) =>
+          x.cycleId === r.cycleId && Number(x.reviewerId) === Number(r.reviewerId)
+          && x.status === 'in_approval' && Number(x.pendingApproverId) === pendingId,
+        ).length;
+        const teamHint = teamCount > 1
+          ? `\n⚠ 该 RM（${empName(r.reviewerId)}）本周期共 ${teamCount} 条审批中的评估将一起驳回，因为调整一人可能需要重新平衡整个团队。`
+          : '';
+        if (!confirm(`确认驳回？将退回至「${targetLabel}」进行重新评估。${teamHint}`)) return;
+        const result = data.rejectTeamPerformanceReviews(r.id, me.value, apprNote.value);
+        if (result.ok) {
           apprModal.value = false;
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已驳回至下级', type: 'info' } }));
+          const msg = result.count > 1
+            ? `已整批驳回 ${result.rmName} 团队 ${result.count} 条评估`
+            : '已驳回至下级';
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'info' } }));
         }
       }
 
-      /* ── Batch approve ── */
-      const batchApproveCount = computed(() =>
-        todoList.value.filter((r) => r.status === 'in_approval' && Number(r.pendingApproverId) === Number(me.value)).length,
-      );
-      function batchApprove() {
-        if (!canApproveAll.value) return;
-        const targets = todoList.value.filter(
-          (r) => r.status === 'in_approval' && Number(r.pendingApproverId) === Number(me.value),
-        );
-        if (!targets.length) return;
-        if (!confirm(`确认一键审批 ${targets.length} 条记录？\n将以当前建议等级直接通过。`)) return;
-        let ok = 0;
-        targets.forEach((r) => {
-          if (data.approvePerformanceReview(r.id, me.value, '一键审批通过', r.rmInitialGrade)) ok++;
-        });
-        window.dispatchEvent(new CustomEvent('tm-toast', {
-          detail: { message: `已审批通过 ${ok}/${targets.length} 条`, type: ok ? 'success' : 'error' },
-        }));
-      }
-
-      /* ── Proxy evaluation (for subordinate's tasks) ── */
+      /* ── Proxy evaluation ── */
       const proxyEvalModal = ref(false);
       const proxyEvalTarget = ref(null);
       const proxyEvalForm = ref({ rmInitialGrade: 'B', rmComment: '', outputDescription: '' });
@@ -644,8 +673,7 @@
         proxyEvalTarget.value = r;
         proxyEvalForm.value = {
           rmInitialGrade: gradeOptions.includes(String(r.rmInitialGrade || '').trim()) ? String(r.rmInitialGrade).trim() : 'B',
-          rmComment: r.rmComment || '',
-          outputDescription: r.outputDescription || '',
+          rmComment: r.rmComment || '', outputDescription: r.outputDescription || '',
         };
         proxyEvalModal.value = true;
       }
@@ -653,23 +681,19 @@
         const r = proxyEvalTarget.value;
         if (!r) return;
         const payload = {
-          rmInitialGrade: proxyEvalForm.value.rmInitialGrade,
-          rmComment: proxyEvalForm.value.rmComment,
-          outputDescription: proxyEvalForm.value.outputDescription,
-          devAdvice: '',
-          historyPerformance: r.historyPerformance || '',
-          prevCycleAvgHours: r.prevCycleAvgHours,
-          comments: r.comments || '',
+          rmInitialGrade: proxyEvalForm.value.rmInitialGrade, rmComment: proxyEvalForm.value.rmComment,
+          outputDescription: proxyEvalForm.value.outputDescription, devAdvice: '',
+          historyPerformance: r.historyPerformance || '', prevCycleAvgHours: r.prevCycleAvgHours, comments: r.comments || '',
         };
         if (data.submitRmPerformanceReview(r.id, payload, { actorId: me.value })) {
           proxyEvalModal.value = false;
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已代替 RM 提交评估', type: 'success' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已代替 RM 完成评估并提交审批', type: 'success' } }));
         } else {
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '提交失败', type: 'error' } }));
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '保存失败', type: 'error' } }));
         }
       }
 
-      /* ── Proxy approval (for subordinate's tasks) ── */
+      /* ── Proxy approval ── */
       const proxyApprModal = ref(false);
       const proxyApprTarget = ref(null);
       const proxyApprGrade = ref('B');
@@ -691,31 +715,57 @@
       function doProxyReject() {
         const r = proxyApprTarget.value;
         if (!r) return;
-        if (!confirm('确认驳回至下级？')) return;
-        if (data.rejectPerformanceReview(r.id, me.value, proxyApprNote.value)) {
+        const pendingId = Number(r.pendingApproverId);
+        const teamCount = data.performanceReviews.filter((x) =>
+          x.cycleId === r.cycleId && Number(x.reviewerId) === Number(r.reviewerId)
+          && x.status === 'in_approval' && Number(x.pendingApproverId) === pendingId,
+        ).length;
+        const teamHint = teamCount > 1
+          ? `\n⚠ 该 RM（${empName(r.reviewerId)}）本周期共 ${teamCount} 条评估将一起驳回。`
+          : '';
+        if (!confirm(`确认驳回至下级？${teamHint}`)) return;
+        const result = data.rejectTeamPerformanceReviews(r.id, me.value, proxyApprNote.value);
+        if (result.ok) {
           proxyApprModal.value = false;
-          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '已驳回', type: 'info' } }));
+          const msg = result.count > 1
+            ? `已整批驳回 ${result.rmName} 团队 ${result.count} 条评估`
+            : '已驳回';
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: 'info' } }));
         }
       }
 
       /* ── Communication ── */
+      const commCycleId = ref(null);
+      const commCycleOptions = computed(() => {
+        const m = me.value;
+        if (!m) return [];
+        const team = subtreeIds.value;
+        const cids = new Set();
+        data.performanceReviews.forEach((r) => {
+          if ((r.status === 'finalized' || r.status === 'pl_approved') && team.has(r.employeeId)) cids.add(r.cycleId);
+        });
+        return data.performanceCycles.filter((c) => cids.has(c.id));
+      });
+      const commSelectedCycle = computed(() => {
+        if (commCycleId.value) return commCycleId.value;
+        if (currentCycle.value) return currentCycle.value.id;
+        return commCycleOptions.value[0]?.id || null;
+      });
       const commDirectList = computed(() => {
         const m = me.value;
         if (!m) return [];
+        const cid = commSelectedCycle.value;
+        const team = subtreeIds.value;
         return data.performanceReviews.filter((r) =>
-          r.status === 'finalized' && directIds.value.has(r.employeeId)
-          && currentCycle.value && r.cycleId === currentCycle.value.id,
+          (r.status === 'finalized' || r.status === 'pl_approved') && team.has(r.employeeId)
+          && cid && r.cycleId === cid,
         );
       });
-
+      function isMyDirectReport(eid) { return directIds.value.has(eid); }
       const commTaskModal = ref(false);
       const commTaskTarget = ref(null);
       const commTaskNotes = ref('');
-      function openCommTask(r) {
-        commTaskTarget.value = r;
-        commTaskNotes.value = r.communicationNotes || '';
-        commTaskModal.value = true;
-      }
+      function openCommTask(r) { commTaskTarget.value = r; commTaskNotes.value = r.communicationNotes || ''; commTaskModal.value = true; }
       function doCommTask() {
         if (!commTaskTarget.value) return;
         if (data.recordCommunication(commTaskTarget.value.id, commTaskNotes.value)) {
@@ -733,21 +783,38 @@
         return [...list].sort((a, b) => TM.reviewSortStamp(data, b).localeCompare(TM.reviewSortStamp(data, a)));
       });
 
+      /* ── PLO actions ── */
+      const isPlOwner = computed(() => auth.isProductLineOwner);
+      const plApproveCount = computed(() => {
+        if (!isPlOwner.value || !currentCycle.value) return 0;
+        return data.performanceReviews.filter((r) => r.cycleId === currentCycle.value.id && r.status === 'calibrated').length;
+      });
+      function plOwnerBatchApprove() {
+        if (!currentCycle.value) return;
+        const targets = data.performanceReviews.filter((r) => r.cycleId === currentCycle.value.id && r.status === 'calibrated');
+        if (!targets.length) return;
+        if (!confirm(`确认审批 ${targets.length} 条已校准评估？`)) return;
+        const actor = auth.currentUser?.employeeId;
+        const count = data.plOwnerApproveReviews(currentCycle.value.id, actor);
+        window.dispatchEvent(new CustomEvent('tm-toast', {
+          detail: { message: `已审批 ${count} 条记录`, type: count ? 'success' : 'error' },
+        }));
+      }
+
       return {
-        auth,
-        tab, me, gradeOptions, allCycles, currentCycle,
-        cycleTypeLabel, cycleLabel, statusLabel, empName, todoKind,
+        auth, tab, me, gradeOptions, allCycles, currentCycle,
+        cycleTypeLabel, cycleLabel, statusLabel, empName, todoKind, displayFinalGrade,
         distRoot, subMgrOptions, distChartRef, statusCards, teamReviewsCurrentCycle, aSumCount, aSumPct,
-        canApproveAll,
+        myEvaluatedCount, myPendingEvalCount, pendingSubApprovalCount, canBatchSubmit, doBatchSubmit,
         todoList, openTask,
         rmModal, rmTarget, rmForm, submitRm,
         apprModal, apprTarget, apprNote, apprGrade, doApprove, doReject,
-        batchApproveCount, batchApprove,
         subordinatePending, urgeSubordinate,
         proxyEvalModal, proxyEvalTarget, proxyEvalForm, openProxyEval, submitProxyEval,
         proxyApprModal, proxyApprTarget, proxyApprGrade, proxyApprNote, openProxyApproval, doProxyApprove, doProxyReject,
-        commDirectList, commTaskModal, commTaskTarget, commTaskNotes, openCommTask, doCommTask,
+        commCycleId, commCycleOptions, commDirectList, commTaskModal, commTaskTarget, commTaskNotes, openCommTask, doCommTask, isMyDirectReport,
         histCycleId, historyFiltered,
+        isPlOwner, plApproveCount, plOwnerBatchApprove,
       };
     },
   };

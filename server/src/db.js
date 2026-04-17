@@ -50,7 +50,7 @@ function bootSeed(db) {
   const demo = buildDemoWorkspace();
 
   const insertLine = db.prepare('INSERT INTO product_lines (id, name, created_at) VALUES (?, ?, ?)');
-  insertLine.run(1, 'Default product line', today);
+  insertLine.run(1, '默认产品线', today);
 
   const insertWs = db.prepare(
     'INSERT INTO workspace_snapshots (line_id, json, version, updated_at) VALUES (?, ?, 1, ?)',
@@ -69,7 +69,7 @@ function bootSeed(db) {
     password_hash: hash('123'),
     username: 'hrbp',
     role: 'hrbp',
-    real_name: 'HRBP Admin',
+    real_name: '张文华',
     employee_id: null,
     super_admin: 0,
   });
@@ -78,7 +78,7 @@ function bootSeed(db) {
     password_hash: hash('123'),
     username: 'manager',
     role: 'manager',
-    real_name: 'Reporting Manager',
+    real_name: '陈志伟',
     employee_id: 1005,
     super_admin: 0,
   });
@@ -87,7 +87,7 @@ function bootSeed(db) {
     password_hash: hash('123'),
     username: 'superadmin',
     role: 'hrbp',
-    real_name: 'Super Admin',
+    real_name: '超级管理员',
     employee_id: null,
     super_admin: 1,
   });
@@ -142,7 +142,7 @@ function createProductLine(db, name) {
         username: 'hrbp',
         email: 'hrbp@company.com',
         role: 'hrbp',
-        realName: 'HRBP Admin',
+        realName: '张文华',
         employeeId: null,
       },
       {
@@ -150,7 +150,7 @@ function createProductLine(db, name) {
         username: 'manager',
         email: 'manager@company.com',
         role: 'manager',
-        realName: 'Reporting Manager',
+        realName: '陈志伟',
         employeeId: null,
       },
       {
@@ -159,7 +159,7 @@ function createProductLine(db, name) {
         email: 'superadmin@company.com',
         role: 'hrbp',
         superAdmin: true,
-        realName: 'Super Admin',
+        realName: '超级管理员',
         employeeId: null,
       },
     ],

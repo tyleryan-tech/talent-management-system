@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人才管理系统 — 操作引导</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#f8fafc;--card:#fff;--accent:#2563eb;--accent2:#7c3aed;--accent3:#059669;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--radius:12px;--shadow:0 1px 3px rgba(0,0,0,.08)}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+/* === Top bar === */
+.topbar{position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid var(--border);padding:0 1.5rem;display:flex;align-items:center;gap:1rem;height:56px;box-shadow:var(--shadow)}
+.topbar h1{font-size:1.1rem;white-space:nowrap}
+.role-tabs{display:flex;gap:4px;margin-left:1.5rem}
+.role-tab{padding:6px 18px;border:none;border-radius:20px;cursor:pointer;font-size:.85rem;font-weight:600;transition:.2s;background:#f1f5f9;color:var(--muted)}
+.role-tab.active{color:#fff}
+.role-tab[data-role="hrbp"].active{background:var(--accent)}
+.role-tab[data-role="manager"].active{background:var(--accent2)}
+.role-tab[data-role="plowner"].active{background:var(--accent3)}
+.auto-ctrl{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--muted)}
+.auto-ctrl button{padding:4px 12px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;font-size:.8rem;transition:.15s}
+.auto-ctrl button:hover{background:#f1f5f9}
+.auto-ctrl button.playing{background:var(--accent);color:#fff;border-color:var(--accent)}
+.speed-sel{padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:.8rem}
+/* === Layout === */
+.app{display:flex;height:calc(100vh - 56px)}
+/* === Sidebar / TOC === */
+.sidebar{width:260px;min-width:260px;background:#fff;border-right:1px solid var(--border);overflow-y:auto;padding:1rem 0}
+.toc-group{margin-bottom:.5rem}
+.toc-group-title{padding:4px 1.25rem;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.toc-item{display:flex;align-items:center;gap:8px;padding:7px 1.25rem;cursor:pointer;font-size:.84rem;transition:.15s;border-left:3px solid transparent;color:var(--text)}
+.toc-item:hover{background:#f8fafc}
+.toc-item.active{border-left-color:var(--accent);background:#eff6ff;font-weight:600;color:var(--accent)}
+.toc-item .toc-num{width:22px;height:22px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;color:var(--muted);flex-shrink:0}
+.toc-item.done .toc-num{background:#dcfce7;color:#16a34a}
+.toc-item.active .toc-num{background:var(--accent);color:#fff}
+.toc-dur{margin-left:auto;font-size:.7rem;color:var(--muted)}
+/* === Main content === */
+.main{flex:1;overflow-y:auto;padding:2rem 2.5rem}
+.step-card{max-width:820px;margin:0 auto;animation:fadeUp .35s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+.step-hd{display:flex;align-items:center;gap:12px;margin-bottom:1.25rem}
+.step-badge{padding:3px 10px;border-radius:12px;font-size:.72rem;font-weight:700;color:#fff}
+.step-badge.hrbp{background:var(--accent)}
+.step-badge.manager{background:var(--accent2)}
+.step-badge.plowner{background:var(--accent3)}
+.step-title{font-size:1.4rem;font-weight:700}
+.step-time{font-size:.78rem;color:var(--muted);margin-left:auto}
+/* Mockup */
+.mockup{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1.5rem}
+.mockup-bar{height:32px;background:#e2e8f0;display:flex;align-items:center;padding:0 12px;gap:6px}
+.mockup-dot{width:10px;height:10px;border-radius:50%}
+.mockup-body{padding:1.25rem;min-height:200px;position:relative}
+.mock-nav{display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap}
+.mock-nav-item{padding:5px 14px;border-radius:6px;font-size:.78rem;background:#e2e8f0;color:var(--muted)}
+.mock-nav-item.hl{background:var(--accent);color:#fff;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.4)}50%{box-shadow:0 0 0 8px rgba(37,99,235,0)}}
+.mock-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.mock-table th{background:#f1f5f9;padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)}
+.mock-table td{padding:6px 10px;border-bottom:1px solid #f1f5f9}
+.mock-btn{display:inline-flex;align-items:center;gap:4px;padding:5px 14px;border-radius:6px;font-size:.76rem;font-weight:600;color:#fff;background:var(--accent)}
+.mock-btn.green{background:#16a34a}
+.mock-btn.orange{background:#d97706}
+.mock-btn.red{background:#dc2626}
+.mock-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.mock-btn.hl{animation:pulse 1.5s infinite}
+.mock-stat{display:inline-block;padding:8px 18px;background:#eff6ff;border-radius:8px;text-align:center;margin:4px}
+.mock-stat .n{font-size:1.4rem;font-weight:700;color:var(--accent)}
+.mock-stat .l{font-size:.72rem;color:var(--muted)}
+.mock-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;text-align:center;font-size:.72rem}
+.mock-grid .cell{padding:14px 6px;border-radius:6px;background:#f1f5f9;transition:.2s}
+.mock-grid .cell.hl{background:#dbeafe;border:2px solid var(--accent);animation:pulse 1.5s infinite}
+.hotspot{position:absolute;border:2px dashed var(--accent);border-radius:8px;background:rgba(37,99,235,.06);animation:pulse 1.5s infinite;pointer-events:none}
+.arrow{position:absolute;color:var(--accent);font-size:1.5rem;animation:bounce 1s infinite}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+/* Steps list */
+.steps-list{counter-reset:step}
+.step-item{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #f1f5f9;animation:fadeUp .3s ease}
+.step-item:last-child{border-bottom:none}
+.step-icon{width:32px;height:32px;border-radius:50%;background:#eff6ff;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--accent);font-size:.85rem}
+.step-item .step-text{flex:1}
+.step-text strong{color:var(--accent)}
+.step-text .op{display:inline-block;padding:1px 8px;border-radius:4px;font-size:.72rem;font-weight:600;margin:0 2px}
+.op.click{background:#dbeafe;color:#1d4ed8}
+.op.input{background:#fef3c7;color:#92400e}
+.op.check{background:#dcfce7;color:#166534}
+.op.wait{background:#f1f5f9;color:#64748b}
+.tip-box{margin-top:1rem;padding:12px 16px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;font-size:.82rem;color:#92400e}
+.tip-box i{margin-right:6px}
+/* Nav buttons */
+.step-nav{display:flex;justify-content:space-between;margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)}
+.nav-btn{padding:8px 20px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:.85rem;transition:.15s;display:flex;align-items:center;gap:6px}
+.nav-btn:hover{background:#f8fafc}
+.nav-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.nav-btn:disabled{opacity:.4;cursor:default}
+/* Progress */
+.progress-wrap{position:fixed;bottom:0;left:0;right:0;height:4px;background:#e2e8f0;z-index:99}
+.progress-bar{height:100%;background:var(--accent);transition:width .3s}
+/* Responsive */
+@media(max-width:768px){.sidebar{display:none}.main{padding:1rem}.topbar{padding:0 .75rem;gap:.5rem}.role-tabs{margin-left:.5rem}.auto-ctrl{gap:4px}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1><i class="fa-solid fa-graduation-cap"></i> 操作引导</h1>
+  <div class="role-tabs">
+    <button class="role-tab active" data-role="hrbp" onclick="switchRole('hrbp')">HRBP 管理员</button>
+    <button class="role-tab" data-role="manager" onclick="switchRole('manager')">汇报经理</button>
+    <button class="role-tab" data-role="plowner" onclick="switchRole('plowner')">产品线负责人</button>
+  </div>
+  <div class="auto-ctrl">
+    <button id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i> 自动播放</button>
+    <select class="speed-sel" id="speedSel" onchange="setSpeed(this.value)">
+      <option value="8000">慢速 8s</option>
+      <option value="5000" selected>中速 5s</option>
+      <option value="3000">快速 3s</option>
+    </select>
+  </div>
+</div>
+
+<div class="app">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main" id="main"></div>
+</div>
+<div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DATA: All steps for all 3 roles
+// ═══════════════════════════════════════════════════════
+
+const ROLES = {
+// ─────── HRBP 管理员 ───────
+hrbp: {
+  label: 'HRBP 管理员',
+  color: '#2563eb',
+  account: 'hrbp@company.com / 123',
+  chapters: [
+    { title: '登录系统', icon: 'fa-right-to-bracket', steps: [
+      { title: '登录系统', time: '~30s', mockup: 'login', instructions: [
+        { icon: 'fa-globe', text: '打开系统地址，进入登录页面' },
+        { icon: 'fa-toggle-on', text: '点击顶部 <span class="op click">HRBP</span> 角色页签' },
+        { icon: 'fa-keyboard', text: '输入邮箱 <span class="op input">hrbp@company.com</span>，密码 <span class="op input">123</span>' },
+        { icon: 'fa-arrow-pointer', text: '点击 <span class="op click">登录</span> 按钮' },
+        { icon: 'fa-check', text: '成功后自动跳转到 <span class="op check">HRBP 仪表盘</span>' },
+      ], tip: '首次打开系统会自动生成演示数据（约120名员工）。' },
+    ]},
+    { title: '仪表盘', icon: 'fa-gauge-high', steps: [
+      { title: '仪表盘概览', time: '~40s', mockup: 'dashboard', instructions: [
+        { icon: 'fa-chart-pie', text: '查看顶部 <strong>统计卡片</strong>：在职人数、本月入职、本月离职、在训人数等' },
+        { icon: 'fa-chart-bar', text: '查看 <strong>部门人数分布</strong> 图表（ECharts 柱状图）' },
+        { icon: 'fa-chart-line', text: '查看 <strong>人员变动趋势</strong> 折线图' },
+        { icon: 'fa-sliders', text: '可点击 <span class="op click">自定义面板</span> 调整图表展示内容' },
+      ]},
+    ]},
+    { title: '花名册管理', icon: 'fa-users', steps: [
+      { title: '查看与搜索', time: '~50s', mockup: 'roster-list', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">花名册</span>' },
+        { icon: 'fa-search', text: '使用顶部 <strong>搜索框</strong> 按姓名/工号/邮箱搜索' },
+        { icon: 'fa-filter', text: '使用 <strong>筛选栏</strong>：部门、状态（在职/试用期/离职）、潜力、职级、性别' },
+        { icon: 'fa-table-columns', text: '点击 <span class="op click">列设置</span> 自定义显示哪些列' },
+        { icon: 'fa-user', text: '点击任意 <strong>员工姓名</strong> 打开详情侧滑面板，查看完整档案和绩效记录' },
+      ]},
+      { title: '新增与编辑', time: '~60s', mockup: 'roster-edit', instructions: [
+        { icon: 'fa-plus', text: '点击 <span class="op click">添加员工</span> 按钮，弹出表单' },
+        { icon: 'fa-keyboard', text: '填写必填字段：<span class="op input">姓名</span>、<span class="op input">部门</span>、<span class="op input">岗位</span>' },
+        { icon: 'fa-floppy-disk', text: '点击 <span class="op click">保存</span>' },
+        { icon: 'fa-pen', text: '编辑：点击操作列的 <span class="op click">编辑</span> 图标，修改后保存' },
+        { icon: 'fa-arrow-right-from-bracket', text: '离职标记：点击 <span class="op click">标记离职</span>，员工状态变为「离职」' },
+      ], tip: '离职员工的绩效数据会保留，不会丢失。' },
+      { title: '导入与导出', time: '~60s', mockup: 'roster-import', instructions: [
+        { icon: 'fa-download', text: '点击 <span class="op click">下载模板</span> 获取 Excel 导入模板' },
+        { icon: 'fa-file-excel', text: '按模板格式填写员工信息（列顺序无关，系统自动智能匹配）' },
+        { icon: 'fa-upload', text: '点击 <span class="op click">导入 Excel</span>，选择文件' },
+        { icon: 'fa-check-double', text: '系统弹出 <strong>字段映射确认</strong> 对话框，确认列对应关系' },
+        { icon: 'fa-file-arrow-down', text: '导出：点击 <span class="op click">导出 Excel</span>，下载当前筛选结果' },
+      ], tip: '导入为整表替换，建议先导出备份！也可用「追加导入」只新增不覆盖。' },
+      { title: '批量操作', time: '~30s', mockup: 'roster-batch', instructions: [
+        { icon: 'fa-check-square', text: '勾选多名员工前面的 <strong>复选框</strong>' },
+        { icon: 'fa-trash', text: '点击 <span class="op click">删除选中</span> 批量移除（需确认）' },
+      ]},
+    ]},
+    { title: '组织管理', icon: 'fa-sitemap', steps: [
+      { title: '部门管理', time: '~60s', mockup: 'org-dept', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">组织管理</span>' },
+        { icon: 'fa-eye', text: '查看 <strong>部门树</strong>，展示层级关系和每个部门的在编/目标HC' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">添加部门</span>，填写部门名称和上级部门' },
+        { icon: 'fa-pen', text: '点击部门行的 <span class="op click">编辑</span>，修改名称/上级' },
+        { icon: 'fa-trash', text: '点击 <span class="op click">删除</span>，部门下的员工会自动转移到上级部门' },
+      ], tip: '部门的变更需要走审批流程（如果配置了审批链）。' },
+      { title: '编制管理', time: '~50s', mockup: 'org-hc', instructions: [
+        { icon: 'fa-th-list', text: '查看每个部门下的 <strong>岗位编制列表</strong>（工种 + 职级 + 目标HC）' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">添加编制</span>，选择工种和职级' },
+        { icon: 'fa-edit', text: '修改 <strong>目标HC</strong> 数值（编制人数计划）' },
+        { icon: 'fa-tag', text: '设置 <strong>招聘优先级</strong>（用于招聘模块联动）' },
+      ]},
+      { title: '组织架构图', time: '~30s', mockup: 'org-chart', instructions: [
+        { icon: 'fa-sitemap', text: '点击 <span class="op click">组织架构图</span> 标签' },
+        { icon: 'fa-expand', text: '查看基于 ECharts 的 <strong>可视化组织树</strong>' },
+        { icon: 'fa-mouse-pointer', text: '悬停查看节点详情（部门名称、负责人、在编人数）' },
+      ]},
+      { title: '变更审批', time: '~50s', mockup: 'org-approval', instructions: [
+        { icon: 'fa-list-check', text: '切换到 <span class="op click">变更申请</span> 标签' },
+        { icon: 'fa-eye', text: '查看待审批列表：类型（新增部门/编制变更等）、申请人、状态' },
+        { icon: 'fa-check', text: '点击 <span class="op click">审批通过</span>（如果你是审批人）' },
+        { icon: 'fa-times', text: '或点击 <span class="op click">驳回</span>，填写驳回原因' },
+        { icon: 'fa-route', text: '多级审批时，会显示当前在审批链的第几步' },
+      ]},
+      { title: '产品线负责人设置', time: '~40s', mockup: 'org-plowner', instructions: [
+        { icon: 'fa-user-tie', text: '在组织管理顶部找到 <span class="op click">产品线负责人</span> 下拉框' },
+        { icon: 'fa-caret-down', text: '选择一名在职员工作为产品线负责人' },
+        { icon: 'fa-shield', text: '系统自动为该员工创建经理账号并赋予 <strong>超级管理员</strong> 等效权限' },
+        { icon: 'fa-info-circle', text: '选择「未设置」可取消产品线负责人' },
+      ], tip: '仅 HRBP 角色可以设置产品线负责人。' },
+    ]},
+    { title: '绩效管理', icon: 'fa-chart-line', steps: [
+      { title: '绩效周期', time: '~50s', mockup: 'perf-cycle', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">绩效管理</span>' },
+        { icon: 'fa-calendar', text: '切换到 <span class="op click">绩效周期</span> 标签' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">新建周期</span>，填写名称、日期范围、类型（年度/半年度）' },
+        { icon: 'fa-play', text: '创建后系统自动为所有在职员工生成待评估绩效记录' },
+        { icon: 'fa-archive', text: '周期结束后可以 <span class="op click">归档</span> 锁定数据' },
+      ]},
+      { title: '评估总览与校准', time: '~70s', mockup: 'perf-overview', instructions: [
+        { icon: 'fa-th-large', text: '切换到 <span class="op click">评估与校准</span> 标签' },
+        { icon: 'fa-chart-pie', text: '查看顶部 <strong>状态卡片</strong>：待评估、待审批、待校准、已完成、已驳回数量' },
+        { icon: 'fa-filter', text: '按 <strong>部门/状态/周期</strong> 筛选绩效记录' },
+        { icon: 'fa-bell', text: '点击 <span class="op click">催促评估</span> 提醒未完成的经理' },
+        { icon: 'fa-bell', text: '点击 <span class="op click">催促校准</span> 提醒其他 HRBP' },
+        { icon: 'fa-user-pen', text: '点击某条记录的 <span class="op click">代评估</span>，可替经理完成评估' },
+        { icon: 'fa-user-check', text: '点击 <span class="op click">代审批</span>，可替上级完成审批' },
+      ]},
+      { title: 'HRBP 校准', time: '~50s', mockup: 'perf-calibrate', instructions: [
+        { icon: 'fa-scale-balanced', text: '当记录状态为 <strong>待校准</strong> 时，点击 <span class="op click">校准</span>' },
+        { icon: 'fa-star', text: '查看经理评估的等级，调整为校准后的最终等级（A/B+/B/C/D）' },
+        { icon: 'fa-magic', text: '或使用 <span class="op click">一键校准</span> 按当前等级直接通过' },
+        { icon: 'fa-check-double', text: '校准完成后，状态变为「待产品线审批」' },
+      ]},
+      { title: '沟通与申诉', time: '~30s', mockup: 'perf-comm', instructions: [
+        { icon: 'fa-comments', text: '切换到 <span class="op click">沟通与申诉</span> 标签' },
+        { icon: 'fa-eye', text: '查看已完成的绩效沟通记录' },
+        { icon: 'fa-clipboard', text: '可查看沟通纪要和申诉内容' },
+      ]},
+    ]},
+    { title: '人才盘点', icon: 'fa-chess-board', steps: [
+      { title: '九宫格', time: '~50s', mockup: 'talent-matrix', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">人才盘点</span>' },
+        { icon: 'fa-th', text: '查看 <strong>九宫格矩阵</strong>（绩效 × 潜力，3×3）' },
+        { icon: 'fa-mouse-pointer', text: '点击任意单元格查看该分类的员工列表' },
+        { icon: 'fa-edit', text: '修改员工的 <strong>潜力评级</strong>（H/M/L）' },
+        { icon: 'fa-pen', text: '编辑员工的 <strong>发展计划</strong>' },
+      ]},
+      { title: '高潜人才表', time: '~40s', mockup: 'talent-highpot', instructions: [
+        { icon: 'fa-star', text: '查看 <strong>高潜人才</strong> 明细表（绩效A/B + 潜力H的员工）' },
+        { icon: 'fa-table', text: '字段包括：绩效历史、薪资段位、司龄、飞行风险、考勤等' },
+        { icon: 'fa-sort', text: '可按任意列 <strong>排序</strong>，按部门/职级 <strong>筛选</strong>' },
+      ]},
+      { title: '继任计划', time: '~40s', mockup: 'talent-succ', instructions: [
+        { icon: 'fa-user-group', text: '切换到 <span class="op click">继任计划</span> 标签' },
+        { icon: 'fa-plus', text: '为关键岗位设置 <strong>继任候选人</strong>' },
+        { icon: 'fa-list', text: '可为同一岗位指定多名候选人并排序' },
+        { icon: 'fa-edit', text: '编辑候选人的培养计划和准备度评估' },
+      ]},
+    ]},
+    { title: '考勤管理', icon: 'fa-clock', steps: [
+      { title: '考勤概览与导入', time: '~50s', mockup: 'att-overview', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">考勤管理</span>' },
+        { icon: 'fa-chart-bar', text: '查看 <strong>月均工时</strong> 和 <strong>6月均工时</strong> 统计' },
+        { icon: 'fa-palette', text: '工时着色：<span style="color:#dc2626">红色(&lt;9.5h)</span> → <span style="color:#16a34a">绿色(≥11h)</span>' },
+        { icon: 'fa-upload', text: '点击 <span class="op click">上传打卡数据</span>，选择 CSV/Excel 文件' },
+        { icon: 'fa-calculator', text: '系统自动计算日均工时、出勤率等' },
+      ]},
+      { title: '部门与个人视图', time: '~30s', mockup: 'att-detail', instructions: [
+        { icon: 'fa-building', text: '在 <strong>部门概览</strong> 中查看各部门的工时统计和负荷比' },
+        { icon: 'fa-user', text: '切换到 <strong>员工视图</strong>，查看个人的每月工时明细' },
+        { icon: 'fa-filter', text: '使用组织范围选择器筛选特定部门' },
+      ]},
+    ]},
+    { title: '招聘管理', icon: 'fa-user-plus', steps: [
+      { title: '招聘总览', time: '~50s', mockup: 'recruit-overview', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">招聘管理</span>' },
+        { icon: 'fa-chart-pie', text: '查看 <strong>招聘概览</strong>：各阶段候选人数、通过率、平均招聘周期' },
+        { icon: 'fa-th-list', text: '切换到 <span class="op click">Pipeline</span> 标签查看招聘管线' },
+        { icon: 'fa-upload', text: '点击 <span class="op click">导入</span> 上传候选人数据（Excel）' },
+        { icon: 'fa-file-arrow-down', text: '点击 <span class="op click">导出</span> 下载当前筛选结果' },
+      ]},
+      { title: '面试官池', time: '~30s', mockup: 'recruit-pool', instructions: [
+        { icon: 'fa-users-cog', text: '切换到 <span class="op click">面试官池</span> 标签' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">添加面试官</span>，选择员工并分配擅长工种/职级' },
+        { icon: 'fa-edit', text: '编辑面试官的擅长方向和面试数据' },
+      ]},
+    ]},
+    { title: '用户管理', icon: 'fa-user-shield', steps: [
+      { title: '账号与权限', time: '~60s', mockup: 'user-mgmt', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">用户管理</span>（仅超级管理员可见）' },
+        { icon: 'fa-eye', text: '查看所有用户账号、角色、关联员工、模块权限' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">新增用户</span>，设置邮箱、密码、角色' },
+        { icon: 'fa-toggle-on', text: '为经理账号开关各模块权限和操作权限' },
+        { icon: 'fa-user-check', text: '审批 <strong>待批准经理</strong>（rmStatus 为 pending_approval 的经理只能访问仪表盘和绩效）' },
+        { icon: 'fa-link', text: '为账号 <strong>关联员工</strong>（将系统用户绑定到花名册中的具体员工）' },
+      ], tip: '超级管理员 = HRBP（hrbpSubType: super_admin）或产品线负责人。普通 HRBP 管理员看不到此菜单。' },
+    ]},
+    { title: '产品线管理', icon: 'fa-layer-group', steps: [
+      { title: '切换与新建', time: '~40s', mockup: 'pl-mgmt', instructions: [
+        { icon: 'fa-arrows-alt-h', text: '在左侧栏底部找到 <strong>产品线切换器</strong>' },
+        { icon: 'fa-exchange-alt', text: '点击切换到其他产品线，数据自动隔离加载' },
+        { icon: 'fa-plus', text: '点击 <span class="op click">新建产品线</span>，输入名称后创建' },
+        { icon: 'fa-trash', text: '点击 <span class="op click">移除产品线</span> 删除当前产品线（至少保留一条）' },
+      ], tip: '新产品线为空白数据 + 默认演示账号。各产品线的员工、组织等数据完全隔离。' },
+    ]},
+  ]
+},
+
+// ─────── 普通汇报经理 ───────
+manager: {
+  label: '汇报经理',
+  color: '#7c3aed',
+  account: 'manager@company.com / 123',
+  chapters: [
+    { title: '登录系统', icon: 'fa-right-to-bracket', steps: [
+      { title: '登录系统', time: '~30s', mockup: 'login-mgr', instructions: [
+        { icon: 'fa-globe', text: '打开系统地址，进入登录页面' },
+        { icon: 'fa-toggle-on', text: '点击 <span class="op click">汇报经理</span> 角色页签' },
+        { icon: 'fa-keyboard', text: '输入邮箱 <span class="op input">manager@company.com</span>，密码 <span class="op input">123</span>' },
+        { icon: 'fa-arrow-pointer', text: '点击 <span class="op click">登录</span>' },
+        { icon: 'fa-check', text: '成功后进入 <span class="op check">经理仪表盘</span>' },
+      ]},
+    ]},
+    { title: '仪表盘', icon: 'fa-gauge-high', steps: [
+      { title: '团队概览与待办', time: '~40s', mockup: 'mgr-dashboard', instructions: [
+        { icon: 'fa-users', text: '查看 <strong>统计卡片</strong>：直属下属数、待评估、待审批、培训中' },
+        { icon: 'fa-list-check', text: '查看 <strong>待办事项</strong> 列表：绩效评估待完成、审批待处理等' },
+        { icon: 'fa-table', text: '查看 <strong>团队成员</strong> 快速列表（姓名、岗位、部门、状态）' },
+      ]},
+    ]},
+    { title: '团队花名册', icon: 'fa-people-group', steps: [
+      { title: '查看团队', time: '~40s', mockup: 'mgr-roster', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">花名册</span>' },
+        { icon: 'fa-eye', text: '只能看到 <strong>自己的直属下属和下属的下属</strong>（团队子树）' },
+        { icon: 'fa-search', text: '可搜索和筛选团队成员' },
+        { icon: 'fa-user', text: '点击姓名查看员工详情' },
+        { icon: 'fa-pen', text: '如有权限，可编辑下属的基本信息' },
+      ], tip: '经理只能看到团队范围内的数据，无法查看整个产品线的员工。' },
+    ]},
+    { title: '绩效管理', icon: 'fa-clipboard-check', steps: [
+      { title: '评估下属', time: '~70s', mockup: 'mgr-perf-eval', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">绩效管理</span>' },
+        { icon: 'fa-th-large', text: '查看 <strong>状态卡片</strong>：待评估、已评估、待审批、已完成、已驳回' },
+        { icon: 'fa-pen-to-square', text: '找到状态为「待评估」的下属，点击 <span class="op click">评估</span>' },
+        { icon: 'fa-star', text: '填写 <strong>绩效等级</strong>（A/B+/B/C/D）和 <strong>评语</strong>' },
+        { icon: 'fa-floppy-disk', text: '点击 <span class="op click">保存</span> 暂存，或 <span class="op click">提交</span> 进入审批流程' },
+        { icon: 'fa-paper-plane', text: '也可使用 <span class="op click">批量提交审批</span> 一次性提交所有已评估的记录' },
+      ]},
+      { title: '审批绩效', time: '~50s', mockup: 'mgr-perf-approve', instructions: [
+        { icon: 'fa-clipboard-check', text: '当你是某位经理的上级时，会看到 <strong>待审批</strong> 记录' },
+        { icon: 'fa-eye', text: '查看下级经理的评估等级和评语' },
+        { icon: 'fa-check', text: '点击 <span class="op click">审批通过</span>，记录进入下一环节' },
+        { icon: 'fa-times', text: '或点击 <span class="op click">驳回</span>，退回给评估人修改' },
+        { icon: 'fa-route', text: '多级审批链中，会显示当前步骤和审批链全貌' },
+      ]},
+      { title: '绩效沟通', time: '~40s', mockup: 'mgr-perf-comm', instructions: [
+        { icon: 'fa-comments', text: '切换到 <span class="op click">绩效沟通</span> 标签' },
+        { icon: 'fa-calendar', text: '选择 <strong>绩效周期</strong> 查看不同周期的沟通记录' },
+        { icon: 'fa-file-lines', text: '查看已归档的绩效沟通纪要和员工反馈' },
+        { icon: 'fa-plus', text: '为已完成的周期 <strong>新增沟通记录</strong>' },
+      ]},
+    ]},
+    { title: '组织管理', icon: 'fa-sitemap', steps: [
+      { title: '查看与提交变更', time: '~40s', mockup: 'mgr-org', instructions: [
+        { icon: 'fa-sidebar', text: '点击左侧导航 <span class="op click">组织管理</span>' },
+        { icon: 'fa-eye', text: '查看团队范围内的 <strong>部门和编制</strong> 信息' },
+        { icon: 'fa-file-pen', text: '如有 <strong>org.submitChange</strong> 权限，可提交组织变更申请' },
+        { icon: 'fa-check', text: '如有 <strong>org.approveChange</strong> 权限，可审批变更请求' },
+      ]},
+    ]},
+    { title: '其他模块', icon: 'fa-ellipsis', steps: [
+      { title: '人才盘点 / 考勤 / 招聘', time: '~30s', mockup: 'mgr-others', instructions: [
+        { icon: 'fa-chess-board', text: '<strong>人才盘点</strong>：查看团队范围的九宫格（如有权限可编辑潜力评级）' },
+        { icon: 'fa-clock', text: '<strong>考勤管理</strong>：查看团队考勤数据（导入操作需 att.import 权限）' },
+        { icon: 'fa-user-plus', text: '<strong>招聘管理</strong>：查看团队招聘 Pipeline（操作权限由管理员控制）' },
+      ], tip: '经理可访问的模块和操作权限由 HRBP 管理员在「用户管理」中配置。' },
+    ]},
+  ]
+},
+
+// ─────── 产品线负责人 ───────
+plowner: {
+  label: '产品线负责人',
+  color: '#059669',
+  account: '由 HRBP 在组织管理中指定',
+  chapters: [
+    { title: '身份说明', icon: 'fa-info-circle', steps: [
+      { title: '角色说明', time: '~40s', mockup: 'pl-intro', instructions: [
+        { icon: 'fa-user-tie', text: '产品线负责人不是独立角色，而是由 HRBP 在 <strong>组织管理</strong> 中指定的' },
+        { icon: 'fa-shield', text: '被指定后，该经理账号自动获得 <strong>等效超级管理员</strong> 权限' },
+        { icon: 'fa-toggle-on', text: '可以访问 <strong>HRBP 工作台</strong>（完整功能）和 <strong>经理工作台</strong>（双区域切换）' },
+        { icon: 'fa-star', text: '特有职责：<strong>绩效最终审批</strong>（HRBP 校准后的终审确认）' },
+        { icon: 'fa-users-cog', text: '可以访问 <strong>用户管理</strong>，管理所有账号和权限' },
+      ], tip: '产品线负责人通常是经理账号（manager），登录时选择「汇报经理」页签。' },
+    ]},
+    { title: '双区域切换', icon: 'fa-arrows-left-right', steps: [
+      { title: '区域切换', time: '~30s', mockup: 'pl-zone', instructions: [
+        { icon: 'fa-toggle-on', text: '登录后，侧边栏顶部出现 <span class="op click">HRBP</span> / <span class="op click">经理</span> 切换按钮' },
+        { icon: 'fa-arrow-right', text: '点击 <span class="op click">HRBP</span> 进入 HRBP 全功能工作台' },
+        { icon: 'fa-arrow-left', text: '点击 <span class="op click">经理</span> 回到经理工作台（团队范围视角）' },
+        { icon: 'fa-layer-group', text: '两个区域的导航菜单、数据范围各自独立' },
+      ]},
+    ]},
+    { title: '绩效终审', icon: 'fa-gavel', steps: [
+      { title: '产品线审批（HRBP 区域）', time: '~60s', mockup: 'pl-perf-hrbp', instructions: [
+        { icon: 'fa-arrow-right', text: '切换到 <span class="op click">HRBP 工作台</span>，打开 <strong>绩效管理</strong>' },
+        { icon: 'fa-eye', text: '查看状态为 <strong>待产品线审批</strong> 的记录（HRBP 校准完成后流转至此）' },
+        { icon: 'fa-check', text: '逐条点击 <span class="op click">审批</span>，确认最终绩效等级' },
+        { icon: 'fa-check-double', text: '或使用 <span class="op click">批量审批</span> 一次性审批所有待审记录' },
+        { icon: 'fa-lock', text: '审批通过后，记录状态变为「已完成」，等级锁定' },
+      ]},
+      { title: '产品线审批（经理区域）', time: '~40s', mockup: 'pl-perf-mgr', instructions: [
+        { icon: 'fa-arrow-left', text: '切换到 <span class="op click">经理工作台</span>，打开 <strong>绩效管理</strong>' },
+        { icon: 'fa-th-large', text: '顶部会出现 <span class="op click">产品线审批</span> 专区' },
+        { icon: 'fa-list', text: '查看所有待产品线审批的绩效记录' },
+        { icon: 'fa-check-double', text: '同样支持逐条审批和 <span class="op click">批量审批</span>' },
+      ], tip: '两个区域都能完成产品线审批，选择你习惯的入口即可。' },
+    ]},
+    { title: 'HRBP 功能', icon: 'fa-user-shield', steps: [
+      { title: '完整 HRBP 功能', time: '~40s', mockup: 'pl-hrbp-full', instructions: [
+        { icon: 'fa-th-large', text: '在 HRBP 工作台中，你可以使用 <strong>全部 HRBP 功能</strong>' },
+        { icon: 'fa-users', text: '<strong>花名册</strong>：查看/编辑全部员工（非仅团队范围）' },
+        { icon: 'fa-sitemap', text: '<strong>组织管理</strong>：管理部门和编制（但无法修改产品线负责人下拉框）' },
+        { icon: 'fa-chess-board', text: '<strong>人才盘点</strong>：查看全产品线的九宫格和高潜人才' },
+        { icon: 'fa-user-plus', text: '<strong>招聘管理</strong>：管理全产品线的招聘 Pipeline' },
+        { icon: 'fa-clock', text: '<strong>考勤管理</strong>：查看和导入全产品线的考勤数据' },
+      ]},
+    ]},
+    { title: '用户管理', icon: 'fa-users-cog', steps: [
+      { title: '管理账号与权限', time: '~50s', mockup: 'pl-user-mgmt', instructions: [
+        { icon: 'fa-sidebar', text: '在 HRBP 工作台点击 <span class="op click">用户管理</span>' },
+        { icon: 'fa-eye', text: '查看和管理所有系统账号' },
+        { icon: 'fa-plus', text: '创建新用户账号，分配角色' },
+        { icon: 'fa-toggle-on', text: '配置经理的 <strong>模块访问权限</strong> 和 <strong>操作权限</strong>' },
+        { icon: 'fa-user-check', text: '审批待激活的经理账号' },
+      ]},
+    ]},
+    { title: '经理职责', icon: 'fa-briefcase', steps: [
+      { title: '常规经理操作', time: '~30s', mockup: 'pl-mgr-ops', instructions: [
+        { icon: 'fa-arrow-left', text: '切换到 <span class="op click">经理工作台</span>' },
+        { icon: 'fa-pen-to-square', text: '评估直属下属的绩效（与普通经理相同）' },
+        { icon: 'fa-clipboard-check', text: '审批下级经理提交的绩效（审批链角色）' },
+        { icon: 'fa-comments', text: '进行绩效沟通和反馈' },
+        { icon: 'fa-eye', text: '查看团队花名册和考勤数据' },
+      ], tip: '产品线负责人同时拥有 HRBP 全局视角和经理团队视角，可根据场景切换。' },
+    ]},
+  ]
+}
+};
+
+// ═══════════════════════════════════════════════════════
+//  MOCKUP RENDERERS
+// ═══════════════════════════════════════════════════════
+function mockBar(){return '<div class="mockup-bar"><div class="mockup-dot" style="background:#ef4444"></div><div class="mockup-dot" style="background:#eab308"></div><div class="mockup-dot" style="background:#22c55e"></div></div>';}
+
+function renderMockup(key, role){
+  const c = ROLES[role].color;
+  const m = {
+    'login': `${mockBar()}<div class="mockup-body" style="text-align:center;padding:2rem">
+      <div style="font-size:1.5rem;font-weight:700;margin-bottom:1rem">人才管理系统</div>
+      <div class="mock-nav" style="justify-content:center"><div class="mock-nav-item hl">HRBP</div><div class="mock-nav-item">汇报经理</div></div>
+      <div style="max-width:280px;margin:0 auto;text-align:left"><div style="margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.82rem;color:var(--muted)">hrbp@company.com</div><div style="margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.82rem;color:var(--muted)">••••</div><div class="mock-btn hl" style="width:100%;justify-content:center;margin-top:12px">登录</div></div></div>`,
+    'login-mgr': `${mockBar()}<div class="mockup-body" style="text-align:center;padding:2rem">
+      <div style="font-size:1.5rem;font-weight:700;margin-bottom:1rem">人才管理系统</div>
+      <div class="mock-nav" style="justify-content:center"><div class="mock-nav-item">HRBP</div><div class="mock-nav-item hl" style="background:${c}">汇报经理</div></div>
+      <div style="max-width:280px;margin:0 auto;text-align:left"><div style="margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.82rem;color:var(--muted)">manager@company.com</div><div style="margin:8px 0;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.82rem;color:var(--muted)">••••</div><div class="mock-btn hl" style="width:100%;justify-content:center;margin-top:12px;background:${c}">登录</div></div></div>`,
+    'dashboard': `${mockBar()}<div class="mockup-body"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem"><div class="mock-stat"><div class="n">586</div><div class="l">在职人数</div></div><div class="mock-stat"><div class="n">12</div><div class="l">本月入职</div></div><div class="mock-stat"><div class="n">3</div><div class="l">本月离职</div></div><div class="mock-stat"><div class="n">45</div><div class="l">在训人数</div></div></div><div style="height:80px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.82rem"><i class="fa-solid fa-chart-bar" style="margin-right:6px"></i>部门人数分布图表</div></div>`,
+    'mgr-dashboard': `${mockBar()}<div class="mockup-body"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem"><div class="mock-stat" style="background:#f5f3ff"><div class="n" style="color:${c}">8</div><div class="l">直属下属</div></div><div class="mock-stat" style="background:#fef3c7"><div class="n" style="color:#d97706">3</div><div class="l">待评估</div></div><div class="mock-stat" style="background:#fce7f3"><div class="n" style="color:#be185d">2</div><div class="l">待审批</div></div><div class="mock-stat" style="background:#dcfce7"><div class="n" style="color:#16a34a">1</div><div class="l">培训中</div></div></div><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;font-size:.82rem"><strong>待办事项</strong><div style="margin-top:6px">· 绩效评估待完成 (3)<br>· 绩效审批待处理 (2)</div></div></div>`,
+  };
+  // Generic mockups based on partial key match
+  if(m[key]) return m[key];
+  if(key.includes('roster')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item hl">花名册</div><div class="mock-btn" style="margin-left:auto">添加员工</div><div class="mock-btn ghost">导入 Excel</div><div class="mock-btn ghost">导出</div></div><table class="mock-table"><thead><tr><th>姓名</th><th>部门</th><th>岗位</th><th>状态</th><th>操作</th></tr></thead><tbody><tr><td>张三</td><td>前端组</td><td>Frontend EE</td><td><span style="color:#16a34a">在职</span></td><td><span style="color:var(--accent);cursor:pointer">编辑</span></td></tr><tr><td>李四</td><td>后端组</td><td>Backend SE</td><td><span style="color:#16a34a">在职</span></td><td><span style="color:var(--accent);cursor:pointer">编辑</span></td></tr><tr><td>王五</td><td>测试组</td><td>QA EE</td><td><span style="color:#d97706">试用期</span></td><td><span style="color:var(--accent);cursor:pointer">编辑</span></td></tr></tbody></table></div>`;
+  if(key.includes('org-dept')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item hl">部门管理</div><div class="mock-nav-item">编制管理</div><div class="mock-nav-item">架构图</div><div class="mock-nav-item">变更申请</div><div class="mock-btn" style="margin-left:auto">添加部门</div></div><table class="mock-table"><thead><tr><th>部门</th><th>上级</th><th>实际HC</th><th>目标HC</th><th>操作</th></tr></thead><tbody><tr><td>└ 前端组</td><td>技术部</td><td>15</td><td>18</td><td><span style="color:var(--accent)">编辑 删除</span></td></tr><tr><td>└ 后端组</td><td>技术部</td><td>20</td><td>22</td><td><span style="color:var(--accent)">编辑 删除</span></td></tr></tbody></table></div>`;
+  if(key.includes('org')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item">部门管理</div><div class="mock-nav-item hl">${key.includes('chart')?'架构图':key.includes('approval')?'变更申请':key.includes('hc')?'编制管理':'产品线负责人'}</div></div><div style="height:120px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.82rem"><i class="fa-solid fa-${key.includes('chart')?'sitemap':key.includes('approval')?'list-check':'user-tie'}" style="margin-right:6px"></i>${key.includes('chart')?'可视化组织架构图':key.includes('approval')?'变更审批列表':key.includes('hc')?'编制列表':'产品线负责人选择'}</div></div>`;
+  if(key.includes('perf')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item ${key.includes('cycle')?'hl':''}">绩效周期</div><div class="mock-nav-item ${key.includes('overview')||key.includes('calibrate')?'hl':''}">评估与校准</div><div class="mock-nav-item ${key.includes('comm')?'hl':''}">沟通与申诉</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"><div class="mock-stat"><div class="n" style="color:#d97706">12</div><div class="l">待评估</div></div><div class="mock-stat"><div class="n" style="color:var(--accent)">8</div><div class="l">待审批</div></div><div class="mock-stat"><div class="n" style="color:#7c3aed">5</div><div class="l">待校准</div></div><div class="mock-stat"><div class="n" style="color:#16a34a">45</div><div class="l">已完成</div></div></div>${key.includes('calibrate')?'<div class="mock-btn green hl" style="margin:8px 4px">一键校准</div><div class="mock-btn hl" style="margin:8px 4px">批量审批</div>':''}</div>`;
+  if(key.includes('talent')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item ${key.includes('matrix')?'hl':''}">九宫格</div><div class="mock-nav-item ${key.includes('highpot')?'hl':''}">高潜人才</div><div class="mock-nav-item ${key.includes('succ')?'hl':''}">继任计划</div></div>${key.includes('matrix')?'<div class="mock-grid" style="margin-top:8px"><div class="cell">低绩效·高潜力<br><strong>3人</strong></div><div class="cell">中绩效·高潜力<br><strong>8人</strong></div><div class="cell hl">高绩效·高潜力<br><strong>12人</strong></div><div class="cell">低绩效·中潜力<br><strong>5人</strong></div><div class="cell">中绩效·中潜力<br><strong>25人</strong></div><div class="cell">高绩效·中潜力<br><strong>15人</strong></div><div class="cell">低绩效·低潜力<br><strong>2人</strong></div><div class="cell">中绩效·低潜力<br><strong>10人</strong></div><div class="cell">高绩效·低潜力<br><strong>6人</strong></div></div>':'<div style="height:100px;background:#f8fafc;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.82rem">'+(key.includes('highpot')?'高潜人才明细表':'继任计划管理')+'</div>'}</div>`;
+  if(key.includes('att')) return `${mockBar()}<div class="mockup-body"><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><div class="mock-stat"><div class="n">9.8h</div><div class="l">月均工时</div></div><div class="mock-stat"><div class="n" style="color:#16a34a">10.2h</div><div class="l">6月均工时</div></div></div><div class="mock-btn hl" style="margin-bottom:8px"><i class="fa-solid fa-upload"></i> 上传打卡数据</div><div style="height:60px;background:linear-gradient(90deg,#fee2e2 0%,#fef3c7 25%,#f1f5f9 50%,#dcfce7 75%,#bbf7d0 100%);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted)">工时着色梯度：红色 → 中性 → 绿色</div></div>`;
+  if(key.includes('recruit')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item ${key.includes('overview')?'hl':''}">招聘概览</div><div class="mock-nav-item">Pipeline</div><div class="mock-nav-item">数据分析</div><div class="mock-nav-item ${key.includes('pool')?'hl':''}">面试官池</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><div class="mock-stat"><div class="n">28</div><div class="l">候选人总数</div></div><div class="mock-stat"><div class="n" style="color:#16a34a">68%</div><div class="l">通过率</div></div></div></div>`;
+  if(key.includes('user')) return `${mockBar()}<div class="mockup-body"><div class="mock-nav"><div class="mock-nav-item hl">用户管理</div><div class="mock-btn" style="margin-left:auto">新增用户</div></div><table class="mock-table"><thead><tr><th>邮箱</th><th>角色</th><th>关联员工</th><th>模块权限</th></tr></thead><tbody><tr><td>hrbp@company.com</td><td><span style="background:#dbeafe;color:#1d4ed8;padding:2px 6px;border-radius:4px;font-size:.72rem">HRBP</span></td><td>—</td><td>全部</td></tr><tr><td>manager@company.com</td><td><span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:.72rem">经理</span></td><td>王大明</td><td>6/7</td></tr></tbody></table></div>`;
+  if(key.includes('pl-')) return `${mockBar()}<div class="mockup-body" style="text-align:center;padding:1.5rem"><div style="display:flex;gap:8px;justify-content:center;margin-bottom:1rem"><div class="mock-btn ghost" style="${key.includes('mgr')||key.includes('ops')?'background:'+c+';color:#fff;border-color:'+c:''}">经理工作台</div><div class="mock-btn ghost" style="${!key.includes('mgr')&&!key.includes('ops')?'background:var(--accent);color:#fff;border-color:var(--accent)':''}">HRBP 工作台</div></div><div style="height:100px;background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.85rem"><i class="fa-solid fa-shield-halved" style="margin-right:8px;color:${c}"></i>${key.includes('perf')?'绩效终审 — 批量审批':key.includes('user')?'用户管理 — 完整权限':key.includes('zone')?'双区域切换':key.includes('intro')?'等效超级管理员权限':'HRBP 完整功能访问'}</div></div>`;
+  if(key.includes('mgr-')) return `${mockBar()}<div class="mockup-body"><div style="height:120px;background:#f8fafc;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.82rem"><i class="fa-solid fa-${key.includes('perf')?'clipboard-check':key.includes('org')?'sitemap':'ellipsis'}" style="margin-right:6px"></i>${key.includes('eval')?'绩效评估界面':key.includes('approve')?'绩效审批界面':key.includes('comm')?'绩效沟通记录':key.includes('org')?'团队组织管理':'经理功能模块'}</div></div>`;
+  // fallback
+  return `${mockBar()}<div class="mockup-body" style="height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted)"><i class="fa-solid fa-desktop" style="margin-right:8px"></i>系统界面示意</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  APP STATE & RENDERING
+// ═══════════════════════════════════════════════════════
+let currentRole = 'hrbp';
+let currentStep = 0;
+let isPlaying = false;
+let playTimer = null;
+let speed = 5000;
+
+function allSteps(role){ const r = ROLES[role]; let s=[]; r.chapters.forEach(ch=>ch.steps.forEach(st=>s.push({...st, chapter:ch.title, chapterIcon:ch.icon}))); return s; }
+
+function switchRole(role){
+  currentRole = role;
+  currentStep = 0;
+  document.querySelectorAll('.role-tab').forEach(t=>t.classList.toggle('active',t.dataset.role===role));
+  document.documentElement.style.setProperty('--accent', ROLES[role].color);
+  render();
+}
+
+function goStep(i){
+  const steps = allSteps(currentRole);
+  if(i<0||i>=steps.length) return;
+  currentStep = i;
+  render();
+}
+
+function render(){
+  const role = ROLES[currentRole];
+  const steps = allSteps(currentRole);
+  const s = steps[currentStep];
+  // Sidebar
+  let tocHtml = '';
+  let idx = 0;
+  role.chapters.forEach(ch=>{
+    tocHtml += `<div class="toc-group"><div class="toc-group-title"><i class="fa-solid ${ch.icon}"></i> ${ch.title}</div>`;
+    ch.steps.forEach(st=>{
+      const cls = idx===currentStep?'active':idx<currentStep?'done':'';
+      const numContent = idx < currentStep ? '<i class="fa-solid fa-check"></i>' : (idx+1);
+      tocHtml += '<div class="toc-item ' + cls + '" onclick="goStep(' + idx + ')"><span class="toc-num">' + numContent + '</span><span>' + st.title + '</span><span class="toc-dur">' + st.time + '</span></div>';
+      idx++;
+    });
+    tocHtml += '</div>';
+  });
+  document.getElementById('sidebar').innerHTML = tocHtml;
+  // Main
+  let html = `<div class="step-card"><div class="step-hd"><span class="step-badge ${currentRole}">${role.label}</span><span class="step-title">${s.title}</span><span class="step-time"><i class="fa-regular fa-clock"></i> ${s.time}</span></div>`;
+  html += `<div class="mockup">${renderMockup(s.mockup, currentRole)}</div>`;
+  html += '<div class="steps-list">';
+  s.instructions.forEach((inst,i)=>{
+    html += `<div class="step-item" style="animation-delay:${i*0.08}s"><div class="step-icon"><i class="fa-solid ${inst.icon}"></i></div><div class="step-text">${inst.text}</div></div>`;
+  });
+  html += '</div>';
+  if(s.tip) html += `<div class="tip-box"><i class="fa-solid fa-lightbulb"></i>${s.tip}</div>`;
+  html += `<div class="step-nav"><button class="nav-btn" onclick="goStep(${currentStep-1})" ${currentStep===0?'disabled':''}><i class="fa-solid fa-chevron-left"></i> 上一步</button><span style="font-size:.82rem;color:var(--muted)">${currentStep+1} / ${steps.length}</span><button class="nav-btn primary" onclick="goStep(${currentStep+1})" ${currentStep===steps.length-1?'disabled':''}>${currentStep===steps.length-1?'已完成':'下一步'} <i class="fa-solid fa-chevron-right"></i></button></div>`;
+  html += '</div>';
+  document.getElementById('main').innerHTML = html;
+  document.getElementById('main').scrollTop = 0;
+  // Progress
+  const pct = ((currentStep+1)/steps.length*100).toFixed(1);
+  document.getElementById('progressBar').style.width = pct+'%';
+  // Active TOC scroll
+  const active = document.querySelector('.toc-item.active');
+  if(active) active.scrollIntoView({block:'center',behavior:'smooth'});
+}
+
+function togglePlay(){
+  isPlaying = !isPlaying;
+  const btn = document.getElementById('playBtn');
+  btn.classList.toggle('playing', isPlaying);
+  btn.innerHTML = isPlaying ? '<i class="fa-solid fa-pause"></i> 暂停' : '<i class="fa-solid fa-play"></i> 自动播放';
+  if(isPlaying) scheduleNext(); else clearTimeout(playTimer);
+}
+
+function scheduleNext(){
+  if(!isPlaying) return;
+  playTimer = setTimeout(()=>{
+    const steps = allSteps(currentRole);
+    if(currentStep < steps.length-1){ goStep(currentStep+1); scheduleNext(); }
+    else{ isPlaying=false; document.getElementById('playBtn').classList.remove('playing'); document.getElementById('playBtn').innerHTML='<i class="fa-solid fa-play"></i> 自动播放'; }
+  }, speed);
+}
+
+function setSpeed(v){ speed=Number(v); if(isPlaying){clearTimeout(playTimer); scheduleNext();} }
+
+// Keyboard navigation
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();goStep(currentStep+1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();goStep(currentStep-1);}
+});
+
+// Init
+render();
+</script>
+</body>
+</html>

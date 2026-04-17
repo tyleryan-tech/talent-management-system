@@ -25,7 +25,7 @@
    * Every RM operation that can be toggled by a super_admin.
    * Grouped by the module they belong to.
    */
-  var RM_PERM_DEFS = [
+  const RM_PERM_DEFS = [
     { key: 'roster.add',       module: 'roster',      label: '添加员工',       desc: '在花名册中新增员工' },
     { key: 'roster.edit',      module: 'roster',      label: '编辑员工',       desc: '修改团队成员信息' },
     { key: 'roster.leave',     module: 'roster',      label: '标记离职',       desc: '将员工标记为离职状态' },
@@ -60,7 +60,7 @@
 
   /** Build a default ops map where every permission is ON */
   function allOpsOn() {
-    var ops = {};
+    const ops = {};
     RM_PERM_DEFS.forEach(function (d) { ops[d.key] = true; });
     return ops;
   }
@@ -85,10 +85,11 @@
         if (!this.currentUser) return false;
         const data = useDataStore();
         const eid = this.currentUser.employeeId;
-        return eid != null && data.orgSettings?.productLineOwnerEmployeeId === eid;
+        const ownerId = data.orgSettings?.productLineOwnerEmployeeId;
+        return eid != null && ownerId != null && ownerId !== '' && Number(ownerId) === Number(eid);
       },
       effectiveSubType() {
-        if (this.isManager && this.isProductLineOwner) return 'super_admin';
+        if (this.isProductLineOwner) return 'super_admin';
         if (this.isHrbp) return this.hrbpSubType;
         if (this.isManager) return 'manager';
         return null;
@@ -109,16 +110,25 @@
        */
       hasPermission(permKey) {
         if (!this.isLoggedIn) return false;
-        var sub = this.effectiveSubType;
-        if (sub === 'super_admin' || sub === 'admin') return true;
+        const sub = this.effectiveSubType;
+        if (sub === 'super_admin') return true;
+        if (sub === 'admin') {
+          if (this.currentUser?.disabledOps && this.currentUser.disabledOps[permKey]) return false;
+          return this.canAccessModule((RM_PERM_DEFS.find(function (d) { return d.key === permKey; }) || {}).module || permKey.split('.')[0]);
+        }
         if (sub === 'intern') {
-          var def = RM_PERM_DEFS.find(function (d) { return d.key === permKey; });
-          var mod = def ? def.module : permKey.split('.')[0];
-          return this.canAccessModule(mod);
+          const def = RM_PERM_DEFS.find(function (d) { return d.key === permKey; });
+          const mod = def ? def.module : permKey.split('.')[0];
+          if (!this.canAccessModule(mod)) return false;
+          if (this.currentUser?.disabledOps && this.currentUser.disabledOps[permKey]) return false;
+          return true;
         }
         if (this.isManager) {
           if (this.currentUser?.rmStatus === 'pending_approval') return false;
-          var perms = this.currentUser?.managerPermissions;
+          const defM = RM_PERM_DEFS.find(function (d) { return d.key === permKey; });
+          const modM = defM ? defM.module : permKey.split('.')[0];
+          if (!this.canAccessModule(modM)) return false;
+          const perms = this.currentUser?.managerPermissions;
           if (!perms || !perms.ops) return true;
           return perms.ops[permKey] !== false;
         }
@@ -127,19 +137,23 @@
 
       canAccessModule(moduleKey) {
         if (!this.isLoggedIn) return false;
-        var sub = this.effectiveSubType;
-        if (sub === 'super_admin' || sub === 'admin') return true;
+        const sub = this.effectiveSubType;
+        if (sub === 'super_admin') return true;
+        if (sub === 'admin') {
+          const am = this.currentUser?.allowedModules;
+          if (!am) return true;
+          return am.includes(moduleKey);
+        }
         if (sub === 'intern') {
           if (moduleKey === 'recruitment') return true;
-          var allowed = this.currentUser?.allowedModules || [];
+          const allowed = this.currentUser?.allowedModules || [];
           return allowed.includes(moduleKey);
         }
         if (this.isManager) {
-          if (this.isProductLineOwner) return true;
           if (this.currentUser?.rmStatus === 'pending_approval') {
             return moduleKey === 'dashboard' || moduleKey === 'performance';
           }
-          var perms = this.currentUser?.managerPermissions;
+          const perms = this.currentUser?.managerPermissions;
           if (!perms || !perms.modules) return true;
           return perms.modules.includes(moduleKey);
         }
@@ -165,25 +179,19 @@
           } catch (e) {
             const code = e.body?.code || '';
             const status = e.status || 0;
-            const isServerDown = status === 0 || status === 500 || status === 502 || status === 503 || status === 504
+            const isServerDown = status === 0 || status === 404 || status === 500 || status === 502 || status === 503 || status === 504
               || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE'
               || code === 'FUNCTION_INVOCATION_FAILED';
-            const is404Html = status === 404 && /NOT_FOUND/i.test(String(e.body?.raw || ''));
-            if (isServerDown || is404Html) {
-              if (this._isProduction()) {
-                return { ok: false, message: '服务暂时不可用，请稍后重试。' };
-              }
-              console.warn('[auth] 服务端不可用，降级为本地账号登录（仅 development 环境）', status, e.message || e);
-              const local = this._localLogin(identifier, password);
-              if (!local.ok) local.message = '服务端暂不可用，本地登录也失败。请稍后重试或刷新页面。';
-              return local;
+            if (isServerDown) {
+              console.warn('[auth] 服务端不可用，降级为本地账号登录', status, e.message || e);
+              return this._localLogin(identifier, password);
+            }
+            if (status === 401) {
+              return this._localLogin(identifier, password);
             }
             const msg = e.body?.error || e.message || '登录失败';
             return { ok: false, message: msg };
           }
-        }
-        if (this._isProduction()) {
-          return { ok: false, message: '服务端同步未启用，无法在生产环境中登录。' };
         }
         return this._localLogin(identifier, password);
       },
@@ -200,11 +208,15 @@
           { id: 4, username: 'intern', email: 'intern@company.com', password: '123', role: 'hrbp', hrbpSubType: 'intern', allowedModules: ['recruitment'], realName: 'Intern Demo', employeeId: null },
           { id: 5, username: 'tyler.yan', email: 'tyler.yan@shopee.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'Tyler Yan', employeeId: null },
         ];
+        data._markDirty('users');
+        data.persistAllSync();
       },
       _migrateUsers() {
         const data = useDataStore();
         if (!data.users) return;
-        var dirty = false;
+        let dirty = false;
+        var plStore = window.TM.useProductLineStore ? window.TM.useProductLineStore() : null;
+        var curLineId = plStore ? plStore.currentLineId : null;
         data.users.forEach(function (u) {
           if (u.role === 'hrbp' && !u.hrbpSubType) {
             u.hrbpSubType = u.superAdmin ? 'super_admin' : 'admin';
@@ -222,17 +234,29 @@
             u.managerPermissions = { modules: MGR_MODULES.slice(), ops: allOpsOn() };
             dirty = true;
           }
+          if (u.homeLineId == null && u.employeeId != null && plStore) {
+            var TM = window.TM;
+            var lines = plStore.lines || [];
+            for (var li = 0; li < lines.length; li++) {
+              var lineEmps = TM.loadKeyForLine(lines[li].id, 'employees', null);
+              if (Array.isArray(lineEmps) && lineEmps.some(function (e) { return e.id === u.employeeId; })) {
+                u.homeLineId = lines[li].id;
+                dirty = true;
+                break;
+              }
+            }
+          }
         });
-        var BUILTIN = [
+        const BUILTIN = [
           { username: 'tyler.yan', email: 'tyler.yan@shopee.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'Tyler Yan', employeeId: null },
         ];
         BUILTIN.forEach(function (b) {
-          var exists = data.users.some(function (u) {
+          const exists = data.users.some(function (u) {
             return (u.email && u.email.toLowerCase() === b.email.toLowerCase())
               || (u.username && u.username === b.username);
           });
           if (!exists) {
-            var maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
+            const maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
             data.users.push(Object.assign({ id: maxId + 1 }, b));
             dirty = true;
           }
@@ -244,12 +268,29 @@
         const data = useDataStore();
         const id = String(identifier || '').trim();
         const idLower = id.toLowerCase();
-        const u = data.users.find((x) => {
-          if (x.password !== password) return false;
+        const _pwMatch = (stored, input) => {
+          if (!stored) return false;
+          if (stored === input) return true;
+          if (stored.startsWith('h$') && typeof window.TM._simpleHash === 'function') {
+            return stored === window.TM._simpleHash(input);
+          }
+          return false;
+        };
+        let u = data.users.find((x) => {
+          if (!_pwMatch(x.password, password)) return false;
           const un = String(x.username || '').trim();
           const em = String(x.email || '').trim().toLowerCase();
           return un === id || (em && em === idLower);
         });
+        if (!u) {
+          u = data.users.find((x) => {
+            if (!_pwMatch(x.password, password)) return false;
+            const un = String(x.username || '').trim().toLowerCase();
+            const em = String(x.email || '').trim().toLowerCase();
+            const rn = String(x.realName || '').trim().toLowerCase();
+            return un.startsWith(idLower) || em.startsWith(idLower) || rn.toLowerCase() === idLower;
+          });
+        }
         if (!u) return { ok: false, message: '邮箱/用户名或密码错误' };
         const { password: _pw, ...safeUser } = u;
         this.currentUser = { ...safeUser };
@@ -275,7 +316,10 @@
         }
         const emp = data.employees.find((e) => e.id === uid);
         if (!emp) {
-          this.currentUser = { ...this.currentUser, employeeId: null, orgRole: '' };
+          // Employee not in current product line — keep employeeId intact
+          // so Login auto-switch can still find the correct line.
+          // Only clear orgRole since we can't determine it cross-line.
+          this.currentUser = { ...this.currentUser, orgRole: '' };
           this.persistSession();
           return;
         }

@@ -205,15 +205,18 @@
     }
 
     const emps = computed(() => zs.scopedEmployees.value);
+    const activeEmps = computed(() => zs.scopedActiveEmployees.value);
     const depts = computed(() => zs.scopedDepartments.value);
 
     const stats = computed(() => {
-      const e = emps.value;
-      const prefix = zs.isManagerZone.value ? 'Team ' : 'Total ';
+      const active = activeEmps.value;
+      const all = emps.value;
+      const leaveCount = all.length - active.length;
+      const prefix = zs.isManagerZone.value ? 'Team ' : '';
       return [
-        { k: 'total', label: prefix + 'employees', value: e.length },
-        { k: 'emp', label: 'Active (incl. probation)', value: e.filter((x) => x.status !== 'leave').length },
-        { k: 'leave', label: 'Leaving', value: e.filter((x) => x.status === 'leave').length },
+        { k: 'total', label: prefix + '在职员工', value: active.length },
+        { k: 'emp', label: '试用期', value: active.filter((x) => x.status === 'probation').length },
+        { k: 'leave', label: '已离职（存档）', value: leaveCount },
       ];
     });
 
