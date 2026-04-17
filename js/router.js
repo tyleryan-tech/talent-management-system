@@ -80,7 +80,7 @@
       next({ path: '/login', query: { redirect: to.fullPath } });
       return;
     }
-    const canHrbp = auth.isHrbp || auth.isSuperAdmin || auth.isProductLineOwner;
+    const canHrbp = auth.isHrbp || auth.isSuperAdmin || auth.isProductLineHead;
     if (to.path.startsWith('/hrbp') && !canHrbp) {
       next('/manager/dashboard');
       return;

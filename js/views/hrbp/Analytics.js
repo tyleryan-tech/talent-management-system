@@ -197,14 +197,14 @@
                 v-for="lv in workExpLevelOptions"
                 :key="'we-' + lv"
                 type="button"
-                :class="['rank-btn', analyticsRankFilter === lv && 'rank-btn-active']"
-                @click="analyticsRankFilter = (analyticsRankFilter === lv ? '' : lv)"
+                :class="['rank-btn', workExpRankFilter === lv && 'rank-btn-active']"
+                @click="workExpRankFilter = (workExpRankFilter === lv ? '' : lv)"
               >{{ lv }}</button>
               <button
-                v-if="analyticsRankFilter"
+                v-if="workExpRankFilter"
                 type="button"
                 class="rank-btn rank-btn-clear"
-                @click="analyticsRankFilter = ''"
+                @click="workExpRankFilter = ''"
               ><i class="fa-solid fa-xmark"></i> All ranks</button>
             </div>
             <div ref="cTenure" class="chart-box"></div>
@@ -332,8 +332,10 @@
       const cLevelHc = ref(null);
       const cAvgTenureDim = ref(null);
 
-      /** Shared rank filter for work experience + hire year charts (same as hire year behavior) */
+      /** Shared rank filter for hire year + other analytics charts */
       const analyticsRankFilter = ref('');
+      /** Independent rank filter for work experience chart only */
+      const workExpRankFilter = ref('');
       const avgTenureDimension = ref('team');
       const productLine = useProductLineStore();
       const charts = [];
@@ -414,11 +416,19 @@
         return Array.from(set).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
       });
 
-      /** Work experience 图表下方快捷职级按钮（与 Rank 下拉联动，数据同源） */
       const workExpLevelOptions = levelOptions;
 
       function empsForTenure() {
-        return scopedEmps();
+        let list = activeEmps();
+        const lv = workExpRankFilter.value;
+        if (lv) {
+          const posMap = data._posMap;
+          list = list.filter((e) => {
+            const p = posMap.get(e.positionId);
+            return p && String(p.level).trim() === lv;
+          });
+        }
+        return list;
       }
 
       function empsForHireYear() {
@@ -483,8 +493,10 @@
           if (workExpBucketMembers[b]) workExpBucketMembers[b].push(e);
         });
         const tenureCounts = WORK_EXP_BUCKETS.map((b) => workExpBucketMembers[b].length);
+        const tenureTotal = tenureCounts.reduce((a, b) => a + b, 0);
         chTenure.setOption({
           tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          grid: { left: 40, right: 20, top: 36, bottom: 40 },
           xAxis: {
             type: 'category',
             data: WORK_EXP_BUCKETS,
@@ -497,8 +509,17 @@
             data: tenureCounts,
             itemStyle: { color: '#8b5cf6', borderRadius: [6, 6, 0, 0] },
             cursor: 'pointer',
+            barMaxWidth: 50,
+            label: {
+              show: true, position: 'top', fontSize: 11, fontWeight: 600,
+              formatter: function (p) {
+                if (!p.value) return '';
+                var pct = tenureTotal ? ((p.value / tenureTotal) * 100).toFixed(1) : '0';
+                return p.value + '\n' + pct + '%';
+              },
+            },
           }],
-        });
+        }, true);
       }
 
       function drawHireYear() {
@@ -840,11 +861,15 @@
         }
 
         watch(analyticsRankFilter, () => { debouncedRedraw(); });
+        watch(workExpRankFilter, () => { drawTenure(); });
         watch(avgTenureDimension, () => { drawAvgTenureDim(); });
         watch(() => productLine.lines?.length, () => { debouncedRedraw(); });
         watch(levelOptions, (opts) => {
           if (analyticsRankFilter.value && !opts.includes(analyticsRankFilter.value)) {
             analyticsRankFilter.value = '';
+          }
+          if (workExpRankFilter.value && !opts.includes(workExpRankFilter.value)) {
+            workExpRankFilter.value = '';
           }
         });
 
@@ -873,7 +898,7 @@
       return {
         cTenure, cHireYear, cTrend, cDevTest, cTradeHc, cLevelHc, cAvgTenureDim,
         scopeRootDeptUi, deptScopeOptions, scopeHint,
-        analyticsRankFilter, avgTenureDimension, levelOptions, workExpLevelOptions, devTest,
+        analyticsRankFilter, workExpRankFilter, avgTenureDimension, levelOptions, workExpLevelOptions, devTest,
         tenureModalOpen, tenureModalBucket, tenureModalRows,
         deptLabel, posLabel, levelLabel, formatWorkExpLabel, careerStartDisplay,
         chartPrefs, showCustomizePanel, showAddChart, newChart, saveCustomChart, visibleCustomCharts,

@@ -1,6 +1,6 @@
 /**
  * Admin — Product Line Management (super_admin only)
- * Global view: list all product lines, create/delete/rename, assign PLO.
+ * Global view: list all product lines, create/delete/rename, assign PLH.
  */
 (function () {
   const { computed, ref, reactive } = Vue;
@@ -34,7 +34,7 @@
                 <th>产品线名称</th>
                 <th>创建日期</th>
                 <th>员工数量</th>
-                <th>产品线负责人 (PLO)</th>
+                <th>产品线负责人 (PLH)</th>
                 <th style="min-width:120px">操作</th>
               </tr>
             </thead>
@@ -62,14 +62,14 @@
                         <option :value="null">— 不指定 —</option>
                         <option v-for="e in ploEmployeeOptions(line.id)" :key="e.id" :value="e.id">{{ e.name }} ({{ e.id }})</option>
                       </select>
-                      <button type="button" class="btn btn-primary btn-sm" @click="confirmPLO(line)"><i class="fa-solid fa-check"></i></button>
+                      <button type="button" class="btn btn-primary btn-sm" @click="confirmPLH(line)"><i class="fa-solid fa-check"></i></button>
                       <button type="button" class="btn btn-ghost btn-sm" @click="ploEditingId = null"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                   </template>
                   <template v-else>
                     <span v-if="line.ploName">{{ line.ploName }}</span>
                     <span v-else class="muted">未指定</span>
-                    <button type="button" class="btn btn-ghost btn-sm" style="margin-left:4px" @click="startPLOEdit(line)" title="指派 PLO">
+                    <button type="button" class="btn btn-ghost btn-sm" style="margin-left:4px" @click="startPLHEdit(line)" title="指派 PLH">
                       <i class="fa-solid fa-pen"></i>
                     </button>
                   </template>
@@ -139,7 +139,7 @@
           var emps = window.TM.loadKeyForLine(line.id, 'employees', null);
           var empCount = Array.isArray(emps) ? emps.length : 0;
           var orgSettings = window.TM.loadKeyForLine(line.id, 'orgSettings', null);
-          var ploEid = orgSettings ? orgSettings.productLineOwnerEmployeeId : null;
+          var ploEid = orgSettings ? orgSettings.productLineHeadEmployeeId : null;
           var ploName = null;
           if (ploEid != null && Array.isArray(emps)) {
             var ploEmp = emps.find(function (e) { return e.id === Number(ploEid); });
@@ -196,15 +196,15 @@
         renamingId.value = null;
       }
 
-      function startPLOEdit(line) {
+      function startPLHEdit(line) {
         ploEditingId.value = line.id;
         ploSelectValue.value = line.ploEid != null ? Number(line.ploEid) : null;
       }
 
-      function confirmPLO(line) {
+      function confirmPLH(line) {
         var newPloEid = ploSelectValue.value;
         var orgSettings = window.TM.loadKeyForLine(line.id, 'orgSettings', null) || {};
-        orgSettings.productLineOwnerEmployeeId = newPloEid;
+        orgSettings.productLineHeadEmployeeId = newPloEid;
         window.TM.saveKeyForLine(line.id, 'orgSettings', orgSettings);
 
         if (line.id === productLine.currentLineId) {
@@ -238,7 +238,7 @@
         }
 
         ploEditingId.value = null;
-        toast('PLO 已更新', 'success');
+        toast('PLH 已更新', 'success');
       }
 
       async function removeLine(line) {
@@ -257,7 +257,7 @@
         productLine, lineDetails,
         createModalOpen, newLineName, openCreateModal, submitCreate,
         renamingId, renameValue, startRename, confirmRename,
-        ploEditingId, ploSelectValue, ploEmployeeOptions, startPLOEdit, confirmPLO,
+        ploEditingId, ploSelectValue, ploEmployeeOptions, startPLHEdit, confirmPLH,
         removeLine,
       };
     },

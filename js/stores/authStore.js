@@ -81,15 +81,15 @@
         if (!this.isHrbp) return null;
         return this.currentUser?.hrbpSubType || (this.isSuperAdmin ? 'super_admin' : 'admin');
       },
-      isProductLineOwner() {
+      isProductLineHead() {
         if (!this.currentUser) return false;
         const data = useDataStore();
         const eid = this.currentUser.employeeId;
-        const ownerId = data.orgSettings?.productLineOwnerEmployeeId;
+        const ownerId = data.orgSettings?.productLineHeadEmployeeId;
         return eid != null && ownerId != null && ownerId !== '' && Number(ownerId) === Number(eid);
       },
       effectiveSubType() {
-        if (this.isProductLineOwner) return 'super_admin';
+        if (this.isProductLineHead) return 'super_admin';
         if (this.isHrbp) return this.hrbpSubType;
         if (this.isManager) return 'manager';
         return null;

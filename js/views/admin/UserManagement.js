@@ -1,7 +1,7 @@
 /**
  * Admin User Management — super_admin only (global view)
  * Decoupled from per-product-line context:
- *   - isPlOwnerAnywhere() scans ALL product lines
+ *   - isPlHeadAnywhere() scans ALL product lines
  *   - empName() resolves via homeLineId
  *   - Users displayed in HR vs Employee categories
  */
@@ -23,27 +23,27 @@
     window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: type || 'info' } }));
   }
 
-  /** Scan all product lines to determine if a user is PLO anywhere */
-  function isPlOwnerAnywhere(u, productLineStore) {
+  /** Scan all product lines to determine if a user is PLH anywhere */
+  function isPlHeadAnywhere(u, productLineStore) {
     if (u.employeeId == null) return false;
     var eid = Number(u.employeeId);
     var lines = productLineStore.lines || [];
     for (var i = 0; i < lines.length; i++) {
       var settings = window.TM.loadKeyForLine(lines[i].id, 'orgSettings', null);
-      if (settings && Number(settings.productLineOwnerEmployeeId) === eid) return true;
+      if (settings && Number(settings.productLineHeadEmployeeId) === eid) return true;
     }
     return false;
   }
 
-  /** Find which product line(s) a user is PLO for */
-  function ploLineNames(u, productLineStore) {
+  /** Find which product line(s) a user is PLH for */
+  function plhLineNames(u, productLineStore) {
     if (u.employeeId == null) return '';
     var eid = Number(u.employeeId);
     var lines = productLineStore.lines || [];
     var names = [];
     for (var i = 0; i < lines.length; i++) {
       var settings = window.TM.loadKeyForLine(lines[i].id, 'orgSettings', null);
-      if (settings && Number(settings.productLineOwnerEmployeeId) === eid) {
+      if (settings && Number(settings.productLineHeadEmployeeId) === eid) {
         names.push(lines[i].name);
       }
     }
@@ -155,24 +155,24 @@
                   <td class="muted small">{{ u.email || '—' }}</td>
                   <td>{{ u.realName || '—' }}</td>
                   <td>
-                    <span v-if="isPlOwner(u)" class="tag tag-product-line-owner">产品线负责人</span>
+                    <span v-if="isPlHead(u)" class="tag tag-product-line-head">产品线负责人</span>
                     <span v-else class="tag tag-mgr">汇报经理</span>
                   </td>
                   <td>
-                    <span v-if="isPlOwner(u)" class="tag tag-ok">{{ ploLines(u) }}</span>
+                    <span v-if="isPlHead(u)" class="tag tag-ok">{{ plhLines(u) }}</span>
                     <span v-else class="tag" :class="rmStatusClass(u)">{{ rmStatusLabel(u) }}</span>
                   </td>
                   <td class="muted small">{{ resolveEmpName(u.employeeId, u.homeLineId) }}</td>
                   <td class="muted small">{{ userLineLabel(u) }}</td>
                   <td>
-                    <template v-if="!isPlOwner(u)">
+                    <template v-if="!isPlHead(u)">
                       <span v-for="m in allMgrModules" :key="m" class="tag tag-mod" :class="{ 'tag-mod-on': mgrHasModule(u, m), 'tag-mod-off': !mgrHasModule(u, m) }" style="margin-right:2px;font-size:0.7rem">{{ moduleLabel(m) }}</span>
                     </template>
                     <span v-else class="muted small">全部</span>
                   </td>
                   <td class="row-actions">
                     <button v-if="canEditUser(u)" type="button" class="btn btn-ghost btn-sm" @click="openEdit(u)" title="编辑"><i class="fa-solid fa-pen"></i></button>
-                    <button v-if="!isPlOwner(u)" type="button" class="btn btn-ghost btn-sm" @click="openPermEdit(u)" title="权限配置"><i class="fa-solid fa-sliders"></i></button>
+                    <button v-if="!isPlHead(u)" type="button" class="btn btn-ghost btn-sm" @click="openPermEdit(u)" title="权限配置"><i class="fa-solid fa-sliders"></i></button>
                     <button v-if="canDeleteUser(u)" type="button" class="btn btn-ghost btn-sm" style="color:#dc2626" @click="deleteUser(u)" title="删除"><i class="fa-solid fa-trash"></i></button>
                   </td>
                 </tr>
@@ -452,7 +452,7 @@
       const empUsers = computed(function () {
         var users = allUsers.value.filter(function (u) { return u.role === 'manager'; });
         if (filterRole.value === 'product_line_owner') {
-          return users.filter(function (u) { return isPlOwner(u); });
+          return users.filter(function (u) { return isPlHead(u); });
         }
         return users;
       });
@@ -508,7 +508,7 @@
       });
 
       function roleLabel(u) {
-        if (isPlOwner(u)) return '产品线负责人';
+        if (isPlHead(u)) return '产品线负责人';
         return ROLE_LABELS[u.role] || u.role;
       }
       function subTypeLabel(u) { return SUBTYPE_LABELS[u.hrbpSubType] || (u.superAdmin ? '超级管理员' : '管理员'); }
@@ -517,11 +517,11 @@
         return 'tag-' + st.replace(/_/g, '-');
       }
 
-      function isPlOwner(u) {
-        return isPlOwnerAnywhere(u, productLineStore);
+      function isPlHead(u) {
+        return isPlHeadAnywhere(u, productLineStore);
       }
-      function ploLines(u) {
-        return ploLineNames(u, productLineStore) || '产品线负责人';
+      function plhLines(u) {
+        return plhLineNames(u, productLineStore) || '产品线负责人';
       }
 
       function resolveEmpName(eid, homeLineId) {
@@ -541,8 +541,8 @@
           }
           return '全局';
         }
-        if (isPlOwner(u)) {
-          return ploLineNames(u, productLineStore) || '—';
+        if (isPlHead(u)) {
+          return plhLineNames(u, productLineStore) || '—';
         }
         var hlid = u.homeLineId;
         if (hlid != null) {
@@ -588,7 +588,7 @@
       }
 
       function permRoleTagClass(u) {
-        if (isPlOwner(u)) return 'tag-product-line-owner';
+        if (isPlHead(u)) return 'tag-product-line-head';
         return u.role === 'hrbp' ? 'tag-hrbp' : 'tag-mgr';
       }
 
@@ -604,7 +604,7 @@
           return (u.allowedModules || []).includes(m);
         }
         if (u.role === 'manager') {
-          if (isPlOwner(u)) return true;
+          if (isPlHead(u)) return true;
           return mgrHasModule(u, m);
         }
         return true;
@@ -625,7 +625,7 @@
           return true;
         }
         if (u.role === 'manager') {
-          if (isPlOwner(u)) return true;
+          if (isPlHead(u)) return true;
           if (u.rmStatus === 'pending_approval') return false;
           if (!userHasModule(u, mod)) return false;
           var perms = u.managerPermissions;
@@ -637,7 +637,7 @@
 
       function canTogglePerm(u) {
         if (auth.effectiveSubType !== 'super_admin') return false;
-        if (isPlOwner(u)) return false;
+        if (isPlHead(u)) return false;
         if (u.role === 'hrbp') {
           var st = u.hrbpSubType || (u.superAdmin ? 'super_admin' : 'admin');
           if (st === 'super_admin') return false;
@@ -946,7 +946,7 @@
         data, auth, tab, allHrbpModules, allMgrModules, permDefs, permGroups,
         filterRole, hrUsers, empUsers, allUsers, pendingRMs,
         filteredEmpOptions, empSearchText, empDropOpen, selectEmp, clearEmpLink,
-        roleLabel, subTypeLabel, subTypeClass, isPlOwner, ploLines, resolveEmpName,
+        roleLabel, subTypeLabel, subTypeClass, isPlHead, plhLines, resolveEmpName,
         permRoleTagClass,
         internHasModule, mgrHasModule, moduleLabel,
         rmStatusLabel, rmStatusClass,

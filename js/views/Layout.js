@@ -81,7 +81,7 @@
 
     const roleLabel = computed(() => {
       if (!auth.currentUser) return '';
-      if (auth.isProductLineOwner) return '产品线负责人';
+      if (auth.isProductLineHead) return '产品线负责人';
       const sub = auth.effectiveSubType;
       if (sub === 'super_admin') return 'Super Admin';
       if (sub === 'admin') return 'HRBP 管理员';
@@ -144,7 +144,7 @@
       return productLine.canSwitchLine;
     });
 
-    const canAccessHrbp = computed(() => auth.isHrbp || auth.isSuperAdmin || auth.isProductLineOwner);
+    const canAccessHrbp = computed(() => auth.isHrbp || auth.isSuperAdmin || auth.isProductLineHead);
     const canAccessMgr = computed(() => auth.isManager);
     const hasDualAccess = computed(() => canAccessHrbp.value && canAccessMgr.value);
 

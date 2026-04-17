@@ -35,7 +35,7 @@
   }
 
   function ownerId(store) {
-    const o = store.orgSettings?.productLineOwnerEmployeeId;
+    const o = store.orgSettings?.productLineHeadEmployeeId;
     if (o == null || o === '') return null;
     const n = Number(o);
     return Number.isNaN(n) ? null : n;

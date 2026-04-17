@@ -59,13 +59,13 @@
           </div>
         </div>
 
-        <!-- PLO batch approve bar -->
-        <div class="card pad" v-if="isPlOwner && plApproveCount > 0" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <!-- PLH batch approve bar -->
+        <div class="card pad" v-if="isPlHead && plApproveCount > 0" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
             <strong>产品线审批</strong>:
             <span class="tag tag-ok">{{ plApproveCount }} 条已校准评估待审批</span>
           </div>
-          <button type="button" class="btn btn-primary btn-sm" @click="plOwnerBatchApprove">
+          <button type="button" class="btn btn-primary btn-sm" @click="plHeadBatchApprove">
             <i class="fa-solid fa-check-double"></i> 批量审批 ({{ plApproveCount }})
           </button>
         </div>
@@ -783,19 +783,19 @@
         return [...list].sort((a, b) => TM.reviewSortStamp(data, b).localeCompare(TM.reviewSortStamp(data, a)));
       });
 
-      /* ── PLO actions ── */
-      const isPlOwner = computed(() => auth.isProductLineOwner);
+      /* ── PLH actions ── */
+      const isPlHead = computed(() => auth.isProductLineHead);
       const plApproveCount = computed(() => {
-        if (!isPlOwner.value || !currentCycle.value) return 0;
+        if (!isPlHead.value || !currentCycle.value) return 0;
         return data.performanceReviews.filter((r) => r.cycleId === currentCycle.value.id && r.status === 'calibrated').length;
       });
-      function plOwnerBatchApprove() {
+      function plHeadBatchApprove() {
         if (!currentCycle.value) return;
         const targets = data.performanceReviews.filter((r) => r.cycleId === currentCycle.value.id && r.status === 'calibrated');
         if (!targets.length) return;
         if (!confirm(`确认审批 ${targets.length} 条已校准评估？`)) return;
         const actor = auth.currentUser?.employeeId;
-        const count = data.plOwnerApproveReviews(currentCycle.value.id, actor);
+        const count = data.plHeadApproveReviews(currentCycle.value.id, actor);
         window.dispatchEvent(new CustomEvent('tm-toast', {
           detail: { message: `已审批 ${count} 条记录`, type: count ? 'success' : 'error' },
         }));
@@ -814,7 +814,7 @@
         proxyApprModal, proxyApprTarget, proxyApprGrade, proxyApprNote, openProxyApproval, doProxyApprove, doProxyReject,
         commCycleId, commCycleOptions, commDirectList, commTaskModal, commTaskTarget, commTaskNotes, openCommTask, doCommTask, isMyDirectReport,
         histCycleId, historyFiltered,
-        isPlOwner, plApproveCount, plOwnerBatchApprove,
+        isPlHead, plApproveCount, plHeadBatchApprove,
       };
     },
   };

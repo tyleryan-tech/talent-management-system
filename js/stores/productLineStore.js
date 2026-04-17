@@ -34,7 +34,7 @@
       positionRecruitTags: {},
       recruitmentCandidates: [],
       recruitmentPositionMetrics: {},
-      orgSettings: { productLineOwnerEmployeeId: null },
+      orgSettings: { productLineHeadEmployeeId: null },
       orgChangeRequests: [],
       rosterColumnSettings: null,
     };

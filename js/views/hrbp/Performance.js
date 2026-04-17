@@ -18,6 +18,7 @@
         </button>
         <button type="button" :class="['btn','btn-sm', tab==='communication'?'btn-primary':'btn-ghost']" @click="tab='communication'">
           <i class="fa-solid fa-comments"></i> 沟通与申诉
+          <span v-if="globalPendingAppealCount" class="perf-badge" style="background:#e67e22">{{ globalPendingAppealCount }}</span>
         </button>
         <button type="button" :class="['btn','btn-sm', tab==='cycles'?'btn-primary':'btn-ghost']" @click="tab='cycles'">
           <i class="fa-solid fa-calendar-days"></i> 绩效周期
@@ -92,11 +93,11 @@
                 :disabled="remindCalCount===0">
                 <i class="fa-solid fa-bell"></i> 催促校准 ({{ remindCalCount }})
               </button>
-              <button v-if="!isPlOwner" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="batchCalibrate"
+              <button v-if="!isPlHead" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="batchCalibrate"
                 :disabled="batchCalCount===0">
                 <i class="fa-solid fa-check-double"></i> 一键校准 ({{ batchCalCount }})
               </button>
-              <button v-if="isPlOwner" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="plOwnerBatchApprove"
+              <button v-if="isPlHead" type="button" class="btn btn-primary btn-sm" style="width:100%" @click="plHeadBatchApprove"
                 :disabled="plApproveCount===0">
                 <i class="fa-solid fa-check-double"></i> 批量审批 ({{ plApproveCount }})
               </button>
@@ -131,8 +132,8 @@
                     <button type="button" class="btn-link" @click="openDetail(r)">详情</button>
                     <button v-if="r.status==='rm_pending'" type="button" class="btn btn-xs btn-secondary" @click="openProxyEval(r)">代评估</button>
                     <button v-if="r.status==='in_approval'" type="button" class="btn btn-xs btn-secondary" @click="openProxyApproval(r)">代审批</button>
-                    <button v-if="r.status==='pl_pending' && !isPlOwner" type="button" class="btn btn-primary btn-xs" @click="openCalibrate(r)">校准</button>
-                    <button v-if="r.status==='calibrated' && isPlOwner" type="button" class="btn btn-primary btn-xs" @click="plOwnerBatchApprove">审批</button>
+                    <button v-if="r.status==='pl_pending' && !isPlHead" type="button" class="btn btn-primary btn-xs" @click="openCalibrate(r)">校准</button>
+                    <button v-if="r.status==='calibrated' && isPlHead" type="button" class="btn btn-primary btn-xs" @click="plHeadBatchApprove">审批</button>
                     <button v-if="canAdjust(r)" type="button" class="btn-link" @click="openAdjust(r)">调整等级</button>
                   </td>
                 </tr>
@@ -146,27 +147,53 @@
       <template v-if="tab==='communication'">
         <div class="card pad">
           <h3 class="section-title">绩效沟通与申诉</h3>
-          <p class="muted small">已归档的绩效记录。RM 可记录沟通内容；沟通后 3 天内员工可提起申诉。</p>
-          <label class="field inline" style="margin-bottom:12px">
-            <span>绩效周期</span>
-            <select v-model.number="commCycleId" class="input">
-              <option v-for="c in allCycles" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
-          </label>
+          <p class="muted small">已归档的绩效记录。记录沟通后 3 天内可登记申诉；HRBP 可按申诉结果调整等级。</p>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+            <label class="field inline">
+              <span>绩效周期</span>
+              <select v-model.number="commCycleId" class="input">
+                <option v-for="c in allCycles" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+            </label>
+            <label class="field inline">
+              <span>申诉筛选</span>
+              <select v-model="appealFilter" class="input">
+                <option value="">全部</option>
+                <option value="pending">待处理申诉</option>
+                <option value="approved">申诉已批准</option>
+                <option value="rejected">申诉已驳回</option>
+                <option value="none">无申诉</option>
+              </select>
+            </label>
+          </div>
+          <div class="perf-comm-stats" style="display:flex;gap:16px;margin-bottom:12px;font-size:13px">
+            <span><strong>{{ commRows.length }}</strong> 条归档记录</span>
+            <span>已沟通 <strong>{{ commCommunicatedCount }}</strong></span>
+            <span style="color:var(--warning,#e67e22)">待处理申诉 <strong>{{ commPendingAppealCount }}</strong></span>
+          </div>
           <div style="overflow-x:auto">
             <table class="data-table compact">
               <thead><tr>
-                <th>员工</th><th>最终等级</th><th>沟通时间</th><th>申诉截止</th><th>沟通记录</th><th>操作</th>
+                <th>员工</th><th>最终等级</th><th>沟通时间</th><th>申诉截止</th><th>申诉状态</th><th>沟通记录</th><th>操作</th>
               </tr></thead>
               <tbody>
-                <tr v-for="r in commRows" :key="r.id">
+                <tr v-for="r in commFilteredRows" :key="r.id">
                   <td>{{ empName(r.employeeId) }}</td>
                   <td><strong>{{ r.finalGrade || '—' }}</strong></td>
                   <td>{{ r.communicatedAt || '未沟通' }}</td>
                   <td>{{ r.appealDeadline || '—' }}</td>
-                  <td class="cell-clip" style="max-width:200px">{{ r.communicationNotes || '—' }}</td>
+                  <td>
+                    <span v-if="r.appealStatus==='pending'" class="tag tag-warning">待处理</span>
+                    <span v-else-if="r.appealStatus==='approved'" class="tag tag-active">已批准</span>
+                    <span v-else-if="r.appealStatus==='rejected'" class="tag tag-muted">已驳回</span>
+                    <span v-else class="muted">—</span>
+                  </td>
+                  <td class="cell-clip" style="max-width:180px">{{ r.communicationNotes || '—' }}</td>
                   <td class="row-actions">
                     <button type="button" class="btn-link" @click="openCommModal(r)">{{ r.communicatedAt ? '编辑沟通' : '记录沟通' }}</button>
+                    <button v-if="canAppeal(r)" type="button" class="btn btn-xs btn-secondary" @click="openAppealModal(r)">登记申诉</button>
+                    <button v-if="r.appealStatus==='pending'" type="button" class="btn btn-xs btn-primary" @click="openResolveModal(r)">处理申诉</button>
+                    <button v-if="r.appealStatus==='approved' || r.appealStatus==='rejected'" type="button" class="btn-link" @click="openAppealDetail(r)">申诉详情</button>
                   </td>
                 </tr>
               </tbody>
@@ -213,6 +240,13 @@
             <div><span class="muted">沟通时间</span><div>{{ detailRow.communicatedAt || '—' }}</div></div>
             <div><span class="muted">申诉截止</span><div>{{ detailRow.appealDeadline || '—' }}</div></div>
             <div><span class="muted">校准人</span><div>{{ detailRow.calibratedBy ? empName(detailRow.calibratedBy) : '—' }}</div></div>
+            <div v-if="detailRow.appealStatus"><span class="muted">申诉状态</span><div>
+              <span v-if="detailRow.appealStatus==='pending'" class="tag tag-warning">待处理</span>
+              <span v-else-if="detailRow.appealStatus==='approved'" class="tag tag-active">已批准</span>
+              <span v-else-if="detailRow.appealStatus==='rejected'" class="tag tag-muted">已驳回</span>
+            </div></div>
+            <div v-if="detailRow.appealReason" class="full"><span class="muted">申诉理由</span><div>{{ detailRow.appealReason }}</div></div>
+            <div v-if="detailRow.appealResult" class="full"><span class="muted">申诉处理结果</span><div>{{ detailRow.appealResult }}</div></div>
             <div class="full"><span class="muted">审批日志</span>
               <ul class="muted small" style="margin:4px 0;padding-left:1.2rem">
                 <li v-for="(log,i) in (detailRow.approvalLog||[])" :key="i">
@@ -311,7 +345,7 @@
       <div v-if="adjustModal" class="modal-backdrop" @click.self="adjustModal=false">
         <div class="modal card">
           <h3>调整等级 · {{ empName(adjustTarget.employeeId) }}</h3>
-          <p class="muted small">当前等级: <strong>{{ adjustTarget.finalGrade || adjustTarget.rmInitialGrade || '—' }}</strong>（归档前可调整）</p>
+          <p class="muted small">当前等级: <strong>{{ adjustTarget.finalGrade || adjustTarget.rmInitialGrade || '—' }}</strong>（HRBP 校准后、归档前可调整）</p>
           <form class="form-grid" @submit.prevent="doAdjust">
             <label class="field"><span>新等级</span>
               <select v-model="adjustGrade" class="input" required>
@@ -339,6 +373,74 @@
               <button type="submit" class="btn btn-primary">保存沟通</button>
             </div>
           </form>
+        </div>
+      </div>
+
+      <!-- Appeal registration modal -->
+      <div v-if="appealModal" class="modal-backdrop" @click.self="appealModal=false">
+        <div class="modal card">
+          <h3>登记申诉 · {{ empName(appealTarget.employeeId) }}</h3>
+          <div class="kv-grid" style="margin-bottom:12px">
+            <div><span class="muted">当前等级</span><div><strong>{{ appealTarget.finalGrade }}</strong></div></div>
+            <div><span class="muted">申诉截止</span><div>{{ appealTarget.appealDeadline }}</div></div>
+          </div>
+          <form class="form-grid" @submit.prevent="doSubmitAppeal">
+            <label class="field full"><span>申诉理由</span>
+              <textarea v-model="appealReason" rows="3" placeholder="员工申诉理由…" required></textarea>
+            </label>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" @click="appealModal=false">取消</button>
+              <button type="submit" class="btn btn-primary">提交申诉</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Appeal resolution modal -->
+      <div v-if="resolveModal" class="modal-backdrop" @click.self="resolveModal=false">
+        <div class="modal card wide">
+          <h3>处理申诉 · {{ empName(resolveTarget.employeeId) }}</h3>
+          <div class="kv-grid" style="margin-bottom:12px">
+            <div><span class="muted">当前等级</span><div><strong>{{ resolveTarget.finalGrade }}</strong></div></div>
+            <div><span class="muted">RM 建议</span><div>{{ resolveTarget.rmInitialGrade || '—' }}</div></div>
+            <div class="full"><span class="muted">申诉理由</span><div>{{ resolveTarget.appealReason || '—' }}</div></div>
+          </div>
+          <div class="form-grid">
+            <label class="field"><span>调整等级 <span class="muted small">（不调整则保持原等级）</span></span>
+              <select v-model="resolveGrade" class="input">
+                <option value="">维持当前等级</option>
+                <option v-for="g in gradeOptions" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </label>
+            <label class="field full"><span>处理意见</span>
+              <textarea v-model="resolveNotes" rows="3" placeholder="处理意见或说明…"></textarea>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" @click="resolveModal=false">取消</button>
+            <button type="button" class="btn btn-secondary" @click="doResolveAppeal(false)"><i class="fa-solid fa-xmark"></i> 驳回申诉</button>
+            <button type="button" class="btn btn-primary" @click="doResolveAppeal(true)"><i class="fa-solid fa-check"></i> 批准申诉</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Appeal detail modal -->
+      <div v-if="appealDetailRow" class="modal-backdrop" @click.self="appealDetailRow=null">
+        <div class="modal card">
+          <h3>申诉详情 · {{ empName(appealDetailRow.employeeId) }}</h3>
+          <div class="kv-grid">
+            <div><span class="muted">最终等级</span><div><strong>{{ appealDetailRow.finalGrade }}</strong></div></div>
+            <div><span class="muted">申诉状态</span><div>
+              <span v-if="appealDetailRow.appealStatus==='approved'" class="tag tag-active">已批准</span>
+              <span v-else class="tag tag-muted">已驳回</span>
+            </div></div>
+            <div class="full"><span class="muted">申诉理由</span><div>{{ appealDetailRow.appealReason || '—' }}</div></div>
+            <div class="full"><span class="muted">处理意见</span><div>{{ appealDetailRow.appealResult || '—' }}</div></div>
+            <div><span class="muted">处理时间</span><div>{{ appealDetailRow.appealResolvedAt || '—' }}</div></div>
+          </div>
+          <div class="modal-actions" style="margin-top:12px">
+            <button type="button" class="btn btn-ghost" @click="appealDetailRow=null">关闭</button>
+          </div>
         </div>
       </div>
 
@@ -506,7 +608,7 @@
         return `共 ${total} 条，${plPending} 待 HRBP 校准，${calibrated} 已校准，${plApproved} 产品线已审批，${finalized} 已归档`;
       });
 
-      const isPlOwner = computed(() => auth.isProductLineOwner);
+      const isPlHead = computed(() => auth.isProductLineHead);
 
       const statusCards = computed(() => {
         const base = filteredBase.value;
@@ -528,6 +630,9 @@
 
       const pendingCalibrationCount = computed(() =>
         (currentCycle.value ? reviewsInScope(currentCycle.value.id) : []).filter((r) => r.status === 'pl_pending').length,
+      );
+      const globalPendingAppealCount = computed(() =>
+        (currentCycle.value ? reviewsInScope(currentCycle.value.id) : []).filter((r) => r.appealStatus === 'pending').length,
       );
 
       /* ── Archive ── */
@@ -620,11 +725,11 @@
 
       /* ── Remind: evaluation (rm_pending + in_approval) ── */
       const remindEvalCount = computed(() =>
-        scopedReviews.value.filter((r) => r.status === 'rm_pending' || r.status === 'in_approval').length,
+        filteredBase.value.filter((r) => r.status === 'rm_pending' || r.status === 'in_approval').length,
       );
 
       function remindEval() {
-        const targets = scopedReviews.value.filter((r) =>
+        const targets = filteredBase.value.filter((r) =>
           (r.status === 'rm_pending' || r.status === 'in_approval') && r.pendingApproverId,
         );
         if (!targets.length) return;
@@ -665,11 +770,11 @@
 
       /* ── Remind: calibration ── */
       const remindCalCount = computed(() =>
-        scopedReviews.value.filter((r) => r.status === 'pl_pending').length,
+        filteredBase.value.filter((r) => r.status === 'pl_pending').length,
       );
 
       function remindCalibration() {
-        const targets = scopedReviews.value.filter((r) => r.status === 'pl_pending');
+        const targets = filteredBase.value.filter((r) => r.status === 'pl_pending');
         if (!targets.length) return;
         const deptGroups = new Map();
         targets.forEach((r) => {
@@ -744,14 +849,14 @@
       const plApproveCount = computed(() =>
         evalRows.value.filter((r) => r.status === 'calibrated').length,
       );
-      function plOwnerBatchApprove() {
+      function plHeadBatchApprove() {
         if (!evalCycleId.value) return;
         const targets = evalRows.value.filter((r) => r.status === 'calibrated');
         if (!targets.length) return;
         if (!confirm(`确认批量审批 ${targets.length} 条已校准记录？`)) return;
         const actor = auth.currentUser?.employeeId;
         const ids = targets.map((r) => r.id);
-        const count = data.plOwnerApproveReviews(evalCycleId.value, actor, ids);
+        const count = data.plHeadApproveReviews(evalCycleId.value, actor, ids);
         window.dispatchEvent(new CustomEvent('tm-toast', {
           detail: { message: `已审批 ${count} 条记录`, type: count ? 'success' : 'error' },
         }));
@@ -782,7 +887,7 @@
       const adjustTarget = ref(null);
       const adjustGrade = ref('B');
       function canAdjust(r) {
-        return r.status !== 'finalized' && r.status !== 'rm_pending';
+        return r.status === 'calibrated' || r.status === 'pl_approved';
       }
       function openAdjust(r) {
         adjustTarget.value = r;
@@ -876,13 +981,22 @@
         }
       }
 
-      /* ── Communication tab ── */
+      /* ── Communication & Appeal tab ── */
       const commCycleId = ref(null);
       watch(currentCycle, (c) => { if (c && commCycleId.value == null) commCycleId.value = c.id; }, { immediate: true });
+      const appealFilter = ref('');
 
       const commRows = computed(() =>
         reviewsInScope(commCycleId.value).filter((r) => r.status === 'finalized'),
       );
+      const commFilteredRows = computed(() => {
+        const f = appealFilter.value;
+        if (!f) return commRows.value;
+        if (f === 'none') return commRows.value.filter((r) => !r.appealStatus);
+        return commRows.value.filter((r) => r.appealStatus === f);
+      });
+      const commCommunicatedCount = computed(() => commRows.value.filter((r) => r.communicatedAt).length);
+      const commPendingAppealCount = computed(() => commRows.value.filter((r) => r.appealStatus === 'pending').length);
 
       const commModal = ref(false);
       const commTarget = ref(null);
@@ -899,6 +1013,50 @@
           window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '沟通记录已保存', type: 'success' } }));
         }
       }
+
+      function canAppeal(r) {
+        if (!r.communicatedAt || r.appealStatus) return false;
+        const today = new Date().toISOString().slice(0, 10);
+        return r.appealDeadline && today <= r.appealDeadline;
+      }
+
+      const appealModal = ref(false);
+      const appealTarget = ref(null);
+      const appealReason = ref('');
+      function openAppealModal(r) {
+        appealTarget.value = r;
+        appealReason.value = '';
+        appealModal.value = true;
+      }
+      function doSubmitAppeal() {
+        if (!appealTarget.value) return;
+        if (data.submitAppeal(appealTarget.value.id, appealReason.value)) {
+          appealModal.value = false;
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: '申诉已登记', type: 'success' } }));
+        }
+      }
+
+      const resolveModal = ref(false);
+      const resolveTarget = ref(null);
+      const resolveGrade = ref('');
+      const resolveNotes = ref('');
+      function openResolveModal(r) {
+        resolveTarget.value = r;
+        resolveGrade.value = '';
+        resolveNotes.value = '';
+        resolveModal.value = true;
+      }
+      function doResolveAppeal(approved) {
+        if (!resolveTarget.value) return;
+        const msg = approved ? '申诉已批准' : '申诉已驳回';
+        if (data.resolveAppeal(resolveTarget.value.id, approved, resolveGrade.value, resolveNotes.value)) {
+          resolveModal.value = false;
+          window.dispatchEvent(new CustomEvent('tm-toast', { detail: { message: msg, type: approved ? 'success' : 'info' } }));
+        }
+      }
+
+      const appealDetailRow = ref(null);
+      function openAppealDetail(r) { appealDetailRow.value = r; }
 
       /* ── Cycle CRUD ── */
       function cycleReviewCount(cycleId) {
@@ -947,19 +1105,23 @@
         scopeRootDeptUi, deptScopeOptions, scopeHint,
         empName, empDept, cycleTypeLabel, cycleLabel, statusLabel,
         evalCycleId, evalStatusFilter, rmFilter, rmOptions, levelFilter, levelOptions,
-        evalRows, evalDist, evalSummary, evalChartRef, statusCards, pendingCalibrationCount,
-        aSumCount, aSumPct, isPlOwner,
+        evalRows, evalDist, evalSummary, evalChartRef, statusCards, pendingCalibrationCount, globalPendingAppealCount,
+        aSumCount, aSumPct, isPlHead,
         canArchive, archiveHint, doArchive,
         remindEvalCount, remindEval, remindCalCount, remindCalibration,
         batchCalCount, batchCalibrate,
-        plApproveCount, plOwnerBatchApprove,
+        plApproveCount, plHeadBatchApprove,
         detailRow, openDetail,
         calModal, calTarget, calGrade, openCalibrate, doCalibrate,
         adjustModal, adjustTarget, adjustGrade, openAdjust, doAdjust, canAdjust,
         proxyEvalModal, proxyEvalTarget, proxyEvalForm, openProxyEval, submitProxyEval,
         proxyApprModal, proxyApprTarget, proxyApprGrade, proxyApprNote,
         openProxyApproval, doProxyApprove, doProxyReject,
-        commCycleId, commRows, commModal, commTarget, commNotes, openCommModal, doComm,
+        commCycleId, commRows, commFilteredRows, commCommunicatedCount, commPendingAppealCount,
+        appealFilter, commModal, commTarget, commNotes, openCommModal, doComm,
+        canAppeal, appealModal, appealTarget, appealReason, openAppealModal, doSubmitAppeal,
+        resolveModal, resolveTarget, resolveGrade, resolveNotes, openResolveModal, doResolveAppeal,
+        appealDetailRow, openAppealDetail,
         cycleModal, cycleForm, cycleEligible, cycleReviewCount, openCycleCreate, editCycle, saveCycle,
       };
     },

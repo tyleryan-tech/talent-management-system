@@ -51,15 +51,15 @@
     const chain = [];
     const emps = data.employees || [];
     const byId = new Map(emps.map((e) => [e.id, e]));
-    const plOwnerId = data.orgSettings?.productLineOwnerEmployeeId != null
-      ? Number(data.orgSettings.productLineOwnerEmployeeId) : null;
+    const plHeadId = data.orgSettings?.productLineHeadEmployeeId != null
+      ? Number(data.orgSettings.productLineHeadEmployeeId) : null;
     let nextId = (() => {
       const cur = rmEmployeeId != null ? byId.get(Number(rmEmployeeId)) : null;
       return cur != null ? cur.managerId : null;
     })();
     const seen = new Set();
     while (nextId != null && !seen.has(Number(nextId))) {
-      if (plOwnerId != null && Number(nextId) === plOwnerId) break;
+      if (plHeadId != null && Number(nextId) === plHeadId) break;
       seen.add(Number(nextId));
       chain.push(Number(nextId));
       const m = byId.get(Number(nextId));

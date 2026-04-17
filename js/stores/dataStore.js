@@ -202,6 +202,10 @@ const GLOBAL_USERS_KEY = 'tm_global_users';
 
 function globalLoadUsers() {
   try {
+    if (window.TM._idb && !window.TM._idb.isFallback() && window.TM._idb.isReady()) {
+      const val = window.TM._idb.loadKey(GLOBAL_USERS_KEY, null);
+      if (val != null) return val;
+    }
     const raw = localStorage.getItem(GLOBAL_USERS_KEY);
     if (raw != null) return JSON.parse(raw);
   } catch (_) { /* ignore */ }
@@ -215,6 +219,9 @@ function globalSaveUsers(users) {
       return Object.assign({}, u, { password: _simpleHash(u.password), _hashed: true });
     });
     localStorage.setItem(GLOBAL_USERS_KEY, JSON.stringify(out));
+    if (window.TM._idb && window.TM._idb.saveKey && !window.TM._idb.isFallback()) {
+      window.TM._idb.saveKey(GLOBAL_USERS_KEY, out);
+    }
   } catch (_) { /* ignore */ }
 }
 function _simpleHash(str) {
@@ -341,7 +348,7 @@ window.TM.useDataStore = defineStore('data', {
     /** 面试官池：[{ id, employeeId, trades:[], levels:[] }] */
     interviewerPool: [],
     /** 产品线负责人工号（组织调整审批链最后一位） */
-    orgSettings: { productLineOwnerEmployeeId: null },
+    orgSettings: { productLineHeadEmployeeId: null },
     /** 组织调整审批单 */
     orgChangeRequests: [],
     /** 花名册列：顺序、显隐、表头覆盖（按产品线持久化） */
@@ -446,7 +453,7 @@ window.TM.useDataStore = defineStore('data', {
       this.recruitmentPipeline = lineScopedLoad('recruitmentPipeline', []);
       this.interviewerPool = lineScopedLoad('interviewerPool', []) || [];
       this.orgSettings = {
-        productLineOwnerEmployeeId: null,
+        productLineHeadEmployeeId: null,
         ...(lineScopedLoad('orgSettings', {}) || {}),
       };
       this.orgChangeRequests = lineScopedLoad('orgChangeRequests', []) || [];
@@ -643,9 +650,9 @@ window.TM.useDataStore = defineStore('data', {
       this.departments = (this.departments || []).map((d) =>
         d.managerId != null && ids.has(Number(d.managerId)) ? { ...d, managerId: null } : d,
       );
-      const owner = this.orgSettings?.productLineOwnerEmployeeId;
+      const owner = this.orgSettings?.productLineHeadEmployeeId;
       if (owner != null && ids.has(Number(owner))) {
-        this.orgSettings = { ...this.orgSettings, productLineOwnerEmployeeId: null };
+        this.orgSettings = { ...this.orgSettings, productLineHeadEmployeeId: null };
       }
       const before = (this.employees || []).length;
       this.employees = (this.employees || [])
@@ -831,7 +838,7 @@ window.TM.useDataStore = defineStore('data', {
       const TM = window.TM;
       const sub = submitter || {};
       const isHrbpOrAdmin = sub.role === 'hrbp' || sub.role === 'super_admin';
-      const own = this.orgSettings?.productLineOwnerEmployeeId;
+      const own = this.orgSettings?.productLineHeadEmployeeId;
       const isOwner = own != null && own !== '' && Number(sub.employeeId) === Number(own);
       const skipApproval = isHrbpOrAdmin || isOwner;
       const chain = skipApproval
@@ -1379,7 +1386,7 @@ window.TM.useDataStore = defineStore('data', {
       return true;
     },
     /** 产品线负责人批量审批：calibrated → pl_approved；可传 reviewIds 限定范围 */
-    plOwnerApproveReviews(cycleId, actorId, reviewIds) {
+    plHeadApproveReviews(cycleId, actorId, reviewIds) {
       const idSet = Array.isArray(reviewIds) && reviewIds.length ? new Set(reviewIds) : null;
       const reviews = this.performanceReviews.filter((r) => {
         if (r.cycleId !== cycleId || r.status !== 'calibrated') return false;
@@ -1443,7 +1450,68 @@ window.TM.useDataStore = defineStore('data', {
       this.persistAll();
       return true;
     },
-    /** HRBP 可在评估产生后至归档前任意阶段调整等级；finalized 后锁定 */
+    /** 登记申诉：归档且已沟通、在申诉期内、无已有申诉 */
+    submitAppeal(reviewId, reason) {
+      const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
+      if (i < 0) return false;
+      const r = this.performanceReviews[i];
+      if (r.status !== 'finalized') return false;
+      if (!r.communicatedAt) return false;
+      if (r.appealStatus === 'pending' || r.appealStatus === 'approved' || r.appealStatus === 'rejected') return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const log = [...(r.approvalLog || []), {
+        approverId: null, at: today, action: 'appeal', note: '员工发起申诉：' + String(reason || '').trim(),
+      }];
+      this.performanceReviews[i] = {
+        ...r,
+        appealStatus: 'pending',
+        appealReason: String(reason || '').trim(),
+        appealSubmittedAt: today,
+        approvalLog: log,
+      };
+      this._markDirty('performanceReviews');
+      this.persistAll();
+      return true;
+    },
+    /** HRBP 处理申诉：批准（可调整等级）或驳回 */
+    resolveAppeal(reviewId, approved, newGrade, notes) {
+      const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
+      if (i < 0) return false;
+      const r = this.performanceReviews[i];
+      if (r.status !== 'finalized' || r.appealStatus !== 'pending') return false;
+      const today = new Date().toISOString().slice(0, 10);
+      const grades = window.TM.PERF_GRADE_OPTIONS;
+      const gradeChanged = approved && newGrade && grades.includes(String(newGrade).trim())
+        && String(newGrade).trim() !== r.finalGrade;
+      const resolvedGrade = gradeChanged ? String(newGrade).trim() : r.finalGrade;
+      const noteStr = String(notes || '').trim();
+      const logEntry = {
+        approverId: window.TM.useAuthStore?.()?.currentUser?.employeeId || null,
+        at: today,
+        action: approved ? 'appeal_approved' : 'appeal_rejected',
+        note: (approved
+          ? ('申诉批准' + (gradeChanged ? `，等级由 ${r.finalGrade} 调整为 ${resolvedGrade}` : '，等级维持不变'))
+          : '申诉驳回') + (noteStr ? '：' + noteStr : ''),
+      };
+      const log = [...(r.approvalLog || []), logEntry];
+      this.performanceReviews[i] = {
+        ...r,
+        appealStatus: approved ? 'approved' : 'rejected',
+        appealResult: noteStr,
+        appealResolvedAt: today,
+        finalGrade: resolvedGrade,
+        approvalLog: log,
+      };
+      if (gradeChanged) {
+        this._syncTalentPerfRating(r.employeeId);
+        this._markDirty('performanceReviews', 'talentMatrix');
+      } else {
+        this._markDirty('performanceReviews');
+      }
+      this.persistAll();
+      return true;
+    },
+    /** HRBP 调整等级：仅在 calibrated / pl_approved 阶段可用（归档前、审批链完成后） */
     hrbpAdjustFinalGrade(reviewId, grade) {
       const grades = window.TM.PERF_GRADE_OPTIONS;
       const g = String(grade || '').trim();
@@ -1451,9 +1519,8 @@ window.TM.useDataStore = defineStore('data', {
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
       const r = this.performanceReviews[i];
-      if (r.status === 'finalized' || r.status === 'rm_pending') return false;
-      const field = (r.status === 'rm_evaluated' || r.status === 'in_approval') ? 'rmInitialGrade' : 'finalGrade';
-      this.performanceReviews[i] = { ...r, [field]: g };
+      if (r.status !== 'calibrated' && r.status !== 'pl_approved') return false;
+      this.performanceReviews[i] = { ...r, finalGrade: g };
       this._markDirty('performanceReviews');
       this.persistAll();
       return true;
@@ -1837,7 +1904,7 @@ window.TM.useDataStore = defineStore('data', {
           return;
         }
         if (k === 'orgSettings') {
-          this[k] = { productLineOwnerEmployeeId: null, ...(obj[k] || {}) };
+          this[k] = { productLineHeadEmployeeId: null, ...(obj[k] || {}) };
           return;
         }
         if (k === 'rosterColumnSettings') {

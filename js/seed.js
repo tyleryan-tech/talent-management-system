@@ -31,7 +31,7 @@ function seedAllData(lineId) {
   function genName(seq) { return SURNAMES[seq % 50] + GIVEN[(seq * 3 + 7) % 48]; }
 
   /* ── 1. Organization: 4-level hierarchy ──
-   * L0: PLO (产品线负责人)
+   * L0: PLH (产品线负责人)
    * L1: 4 Department Directors + HR Director
    * L2: 14 Team Leads (3-4 per department)
    * L3: ~181 ICs + 10 hired = 210 total employees
@@ -91,7 +91,7 @@ function seedAllData(lineId) {
   var CORE = [
     // 1001: HR Director / HRBP super admin
     { id:1001, name:'张文华', dept:19, trade:'Big Data', mgr:1002, hire:'2016-03-01', status:'active', orgRole:'PIC' },
-    // 1002-1005: L1 Department Directors → report to PLO (1002 is PLO)
+    // 1002-1005: L1 Department Directors → report to PLH (1002 is PLH)
     { id:1002, name:'陈志伟', dept:1, trade:'Backend', mgr:null, hire:'2015-01-10', status:'active', orgRole:'PIC' },
     { id:1003, name:'李明远', dept:2, trade:'Frontend', mgr:1002, hire:'2016-06-15', status:'active', orgRole:'PIC' },
     { id:1004, name:'王雅琴', dept:3, trade:'Frontend', mgr:1002, hire:'2016-09-01', status:'active', orgRole:'PIC' },
@@ -488,13 +488,25 @@ function seedAllData(lineId) {
   {
     var GLOBAL_USERS_KEY = 'tm_global_users';
     var existing = [];
-    try { var raw = localStorage.getItem(GLOBAL_USERS_KEY); if (raw) existing = JSON.parse(raw)||[]; } catch(_){}
+    try {
+      if (window.TM._idb && !window.TM._idb.isFallback() && window.TM._idb.isReady()) {
+        var idbVal = window.TM._idb.loadKey(GLOBAL_USERS_KEY, null);
+        if (idbVal) existing = idbVal;
+      }
+      if (!existing.length) {
+        var raw = localStorage.getItem(GLOBAL_USERS_KEY);
+        if (raw) existing = JSON.parse(raw)||[];
+      }
+    } catch(_){}
     var merged = new Map();
     existing.forEach(function(u){ merged.set(String(u.email||u.username||u.id).toLowerCase(), u); });
     users.forEach(function(u){ merged.set(String(u.email||u.username||u.id).toLowerCase(), u); });
     var nextUid=1, result=[];
     merged.forEach(function(u){ u.id=nextUid++; result.push(u); });
     localStorage.setItem(GLOBAL_USERS_KEY, JSON.stringify(result));
+    if (window.TM._idb && window.TM._idb.saveKey && !window.TM._idb.isFallback()) {
+      window.TM._idb.saveKey(GLOBAL_USERS_KEY, result);
+    }
   }
   saveKey('leaveRequests', leaveRequests);
   saveKey('performanceReviews', performanceReviews);
@@ -513,10 +525,10 @@ function seedAllData(lineId) {
   saveKey('recruitmentCandidates', []);
   saveKey('recruitmentPipeline', recruitmentPipeline);
   saveKey('interviewerPool', interviewerPool);
-  saveKey('orgSettings', { productLineOwnerEmployeeId: 1002 });
+  saveKey('orgSettings', { productLineHeadEmployeeId: 1002 });
   saveKey('orgChangeRequests', []);
   saveKey('rosterColumnSettings', null);
-  saveKey('_seedVersion', 20);
+  saveKey('_seedVersion', 21);
   return { seeded: true };
 }
 TM.seedAllData = seedAllData;
@@ -719,11 +731,14 @@ function seedMultiLevelOrg(lineId) {
   saveKey('performanceCycles',cycles);saveKey('talentMatrix',talentMatrix);saveKey('successionPlans',[]);
   saveKey('notifications',[]);saveKey('positionRecruitTags',{});saveKey('recruitmentCandidates',[]);
   saveKey('recruitmentPositionMetrics',{});saveKey('recruitmentPipeline',[]);saveKey('interviewerPool',[]);
-  saveKey('orgSettings',{productLineOwnerEmployeeId:2001});saveKey('orgChangeRequests',[]);
-  saveKey('rosterColumnSettings',null);saveKey('_seedVersion',20);
+  saveKey('orgSettings',{productLineHeadEmployeeId:2001});saveKey('orgChangeRequests',[]);
+  saveKey('rosterColumnSettings',null);saveKey('_seedVersion',21);
   var GLOBAL_USERS_KEY='tm_global_users';
   var existingUsers=[];
-  try{var rawU=localStorage.getItem(GLOBAL_USERS_KEY);if(rawU)existingUsers=JSON.parse(rawU)||[];}catch(_){}
+  try{
+    if(window.TM._idb&&!window.TM._idb.isFallback()&&window.TM._idb.isReady()){var idbVal2=window.TM._idb.loadKey(GLOBAL_USERS_KEY,null);if(idbVal2)existingUsers=idbVal2;}
+    if(!existingUsers.length){var rawU=localStorage.getItem(GLOBAL_USERS_KEY);if(rawU)existingUsers=JSON.parse(rawU)||[];}
+  }catch(_){}
   var mgrMods2=['dashboard','roster','org','recruitment','talent','performance','attendance'];
   var mgrOps2=TM.RM_ALL_OPS_ON?TM.RM_ALL_OPS_ON():{};
   var newAccounts=[
@@ -746,6 +761,7 @@ function seedMultiLevelOrg(lineId) {
   var nid=1,finalUsers=[];
   merged.forEach(function(u){u.id=nid++;finalUsers.push(u);});
   localStorage.setItem(GLOBAL_USERS_KEY,JSON.stringify(finalUsers));
+  if(window.TM._idb&&window.TM._idb.saveKey&&!window.TM._idb.isFallback()){window.TM._idb.saveKey(GLOBAL_USERS_KEY,finalUsers);}
   return{seeded:true,employeeCount:employees.length,reviewCount:reviews.length};
 }
 TM.seedMultiLevelOrg = seedMultiLevelOrg;

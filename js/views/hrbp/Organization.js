@@ -584,13 +584,13 @@
 
     const orgOwnerId = computed({
       get() {
-        const v = data.orgSettings?.productLineOwnerEmployeeId;
+        const v = data.orgSettings?.productLineHeadEmployeeId;
         if (v != null && data.employees.some((e) => e.id === Number(v))) return Number(v);
         return null;
       },
       set(v) {
         const eid = v != null ? Number(v) : null;
-        data.updateOrgSettings({ productLineOwnerEmployeeId: eid });
+        data.updateOrgSettings({ productLineHeadEmployeeId: eid });
         if (eid == null) return;
         const emp = data.employees.find((e) => e.id === eid);
         if (!emp) return;
@@ -927,7 +927,7 @@
     }
 
     function productLineLeaderName() {
-      var ploEid = data.orgSettings?.productLineOwnerEmployeeId;
+      var ploEid = data.orgSettings?.productLineHeadEmployeeId;
       if (ploEid != null) {
         var nm = empName(Number(ploEid));
         if (nm && nm !== '—') return nm;

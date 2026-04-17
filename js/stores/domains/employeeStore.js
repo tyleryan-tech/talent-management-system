@@ -16,7 +16,7 @@
         employees: [],
         departments: [],
         positions: [],
-        orgSettings: { productLineOwnerEmployeeId: null },
+        orgSettings: { productLineHeadEmployeeId: null },
         orgChangeRequests: [],
         rosterColumnSettings: null,
       };

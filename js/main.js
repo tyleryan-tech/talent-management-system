@@ -64,6 +64,9 @@
   }
 
   function _clearLineScopedData(lid) {
+    if (typeof TM.clearLineStorage === 'function') {
+      TM.clearLineStorage(lid);
+    }
     var prefix = 'tm_L' + lid + '_';
     var toRemove = [];
     for (var i = 0; i < localStorage.length; i++) {
@@ -71,6 +74,12 @@
       if (k && k.indexOf(prefix) === 0) toRemove.push(k);
     }
     toRemove.forEach(function (k) { localStorage.removeItem(k); });
+  }
+  function _clearGlobalUsers() {
+    try { localStorage.removeItem('tm_global_users'); } catch (_) {}
+    if (TM._idb && TM._idb.saveKey && !TM._idb.isFallback()) {
+      TM._idb.saveKey('tm_global_users', null);
+    }
   }
   authStore.restoreSession();
   // Set Sentry user context
@@ -105,25 +114,28 @@
   if (!dataLoadedFromServer) {
     try {
       if (lineId === 3 && typeof TM.seedMultiLevelOrg === 'function'
-          && TM.loadKeyForLine(3, '_multiLevelSeeded', 0) < 5) {
+          && TM.loadKeyForLine(3, '_multiLevelSeeded', 0) < 6) {
         _clearLineScopedData(3);
+        _clearGlobalUsers();
         TM.seedMultiLevelOrg(3);
-        TM.saveKeyForLine(3, '_multiLevelSeeded', 5);
+        TM.saveKeyForLine(3, '_multiLevelSeeded', 6);
         window.__TM_FIRST_SEED__ = true;
       } else if (lineId != null && !TM.lineHasEmployeeStorage(lineId)) {
+        _clearGlobalUsers();
         TM.seedAllData(lineId);
         window.__TM_FIRST_SEED__ = true;
       } else if (lineId != null) {
         const sv = TM.loadKeyForLine(lineId, '_seedVersion', 0);
-        if (sv < 20) {
+        if (sv < 21) {
           _clearLineScopedData(lineId);
+          _clearGlobalUsers();
           if (lineId === 3 && typeof TM.seedMultiLevelOrg === 'function') {
             TM.seedMultiLevelOrg(3);
-            TM.saveKeyForLine(3, '_multiLevelSeeded', 5);
+            TM.saveKeyForLine(3, '_multiLevelSeeded', 6);
           } else {
             TM.seedAllData(lineId);
           }
-          TM.saveKeyForLine(lineId, '_seedVersion', 20);
+          TM.saveKeyForLine(lineId, '_seedVersion', 21);
         }
       }
     } catch (seedErr) {
