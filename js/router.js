@@ -12,7 +12,7 @@
       component: TM.LayoutView,
       meta: { zone: 'hrbp' },
       children: [
-        { path: '', redirect: '/hrbp/dashboard' },
+        { path: '', redirect: '/hrbp/ai-analyst' },
         { path: 'dashboard', name: 'hrbp-dashboard', component: TM.HrbpDashboard, meta: { title: 'Dashboard' } },
         { path: 'roster', name: 'hrbp-roster', component: TM.HrbpRoster, meta: { title: 'Employee roster' } },
         { path: 'org', name: 'hrbp-org', component: TM.HrbpOrg, meta: { title: 'Organization' } },
@@ -30,7 +30,7 @@
       component: TM.LayoutView,
       meta: { zone: 'manager' },
       children: [
-        { path: '', redirect: '/manager/dashboard' },
+        { path: '', redirect: '/manager/ai-analyst' },
         { path: 'dashboard', name: 'mgr-dashboard', component: TM.HrbpDashboard, meta: { title: 'Dashboard' } },
         { path: 'roster', name: 'mgr-roster', component: TM.HrbpRoster, meta: { title: '花名册' } },
         { path: 'org', name: 'mgr-org', component: TM.HrbpOrg, meta: { title: '组织管理' } },
@@ -70,10 +70,10 @@
       if (auth.isLoggedIn && to.name === 'login') {
         if (auth.isHrbp) {
           const HRBP_MODS = window.TM.HRBP_MODULES || [];
-          const firstMod = HRBP_MODS.find((m) => auth.canAccessModule(m)) || 'recruitment';
-          next('/hrbp/' + firstMod);
+          const firstMod = HRBP_MODS.find((m) => auth.canAccessModule(m)) || 'ai_analyst';
+          next('/hrbp/' + firstMod.replace(/_/g, '-'));
         } else {
-          next('/manager/dashboard');
+          next('/manager/ai-analyst');
         }
       } else next();
       return;
@@ -84,15 +84,15 @@
     }
     const canHrbp = auth.isHrbp || auth.isSuperAdmin || auth.isProductLineHead;
     if (to.path.startsWith('/hrbp') && !canHrbp) {
-      next('/manager/dashboard');
+      next('/manager/ai-analyst');
       return;
     }
     if (to.path.startsWith('/manager') && !auth.isManager) {
-      next('/hrbp/dashboard');
+      next('/hrbp/ai-analyst');
       return;
     }
     if (to.path.startsWith('/admin') && !auth.canManageUsers) {
-      next(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
+      next(auth.isHrbp ? '/hrbp/ai-analyst' : '/manager/ai-analyst');
       return;
     }
     if (to.meta.requireSuperAdmin && !auth.canManageUsers) {
@@ -100,7 +100,7 @@
       return;
     }
     if (to.path.startsWith('/hrbp/') && auth.isHrbp) {
-      const seg = to.path.split('/')[2];
+      const seg = (to.path.split('/')[2] || '').replace(/-/g, '_');
       if (seg && seg !== 'users') {
         if (!auth.canAccessModule(seg)) {
           const HRBP_MODS = window.TM.HRBP_MODULES || [];
@@ -111,7 +111,7 @@
       }
     }
     if (to.path.startsWith('/manager/') && auth.isManager) {
-      const seg = to.path.split('/')[2];
+      const seg = (to.path.split('/')[2] || '').replace(/-/g, '_');
       if (seg && !auth.canAccessModule(seg)) {
         const MGR_MODS = window.TM.MGR_MODULES || [];
         const fallback = MGR_MODS.find((m) => auth.canAccessModule(m)) || 'dashboard';

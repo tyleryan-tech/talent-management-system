@@ -46,7 +46,8 @@
       );
 
       function empName(id) {
-        return data.employees.find((e) => e.id === id)?.name || id;
+        var n = Number(id);
+        return data.employees.find((e) => Number(e.id) === n)?.name || id;
       }
       function typeLabel(t) {
         return {

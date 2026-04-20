@@ -220,6 +220,13 @@
         if (this.currentLineId === id) {
           this.currentLineId = this.lines[0].id;
         }
+        var users = data.users || [];
+        users.forEach(function (u) {
+          if (u.homeLineId != null && Number(u.homeLineId) === id) {
+            u.homeLineId = null;
+          }
+        });
+        data._markDirty('users');
         this.persistRegistry();
         TM.clearLineStorage(id);
         const hr = TM.useHrScopeStore();

@@ -1,34 +1,29 @@
 /**
  * AI 数据分析 — 嵌入 Streamlit 对话界面
- * 当 Streamlit 服务未启动时显示引导说明
  */
 (function () {
-  const { ref, onMounted, onUnmounted } = Vue;
+  const { ref, onMounted } = Vue;
 
   window.TM.HrbpAiAnalyst = {
     name: 'HrbpAiAnalyst',
     template: `
-      <div class="page-stack">
-        <div class="page-header">
-          <h2><i class="fa-solid fa-robot"></i> AI 数据分析助手</h2>
-          <p class="muted">输入中文问题，AI 自动查询 HR 数据库并生成分析报告</p>
-        </div>
-
-        <div v-if="status === 'loading'" class="card pad" style="text-align:center;padding:3rem">
+      <div class="page-stack ai-analyst-page">
+        <div v-show="status === 'loading'" class="card pad" style="text-align:center;padding:3rem">
           <i class="fa-solid fa-spinner fa-spin" style="font-size:2rem;color:#6366f1"></i>
           <p class="muted" style="margin-top:1rem">正在检测 AI 分析服务…</p>
         </div>
 
-        <div v-else-if="status === 'online'" class="ai-analyst-frame-wrap">
+        <div v-show="status === 'online'" class="ai-analyst-frame-wrap">
           <iframe
-            :src="streamlitUrl"
+            v-if="iframeSrc"
+            :src="iframeSrc"
             class="ai-analyst-frame"
             frameborder="0"
             allow="clipboard-write"
           ></iframe>
         </div>
 
-        <div v-else class="card pad ai-analyst-guide">
+        <div v-show="status === 'offline'" class="card pad ai-analyst-guide">
           <div class="ai-guide-icon">
             <i class="fa-solid fa-terminal"></i>
           </div>
@@ -58,44 +53,46 @@
               </div>
             </div>
           </div>
-          <button class="btn btn-primary" style="margin-top:1.5rem" @click="checkService">
+          <button class="btn btn-primary" style="margin-top:1.5rem" @click="retry">
             <i class="fa-solid fa-rotate"></i> 重新检测
           </button>
         </div>
       </div>
     `,
     setup() {
-      const port = 8501;
-      const streamlitUrl = ref('http://localhost:' + port);
-      const status = ref('loading');
-      let pollTimer = null;
+      var url = 'http://localhost:8501';
+      var status = ref('loading');
+      var iframeSrc = ref(null);
 
-      async function checkService() {
-        status.value = 'loading';
-        try {
-          const ctrl = new AbortController();
-          const tid = setTimeout(() => ctrl.abort(), 4000);
-          const resp = await fetch('http://localhost:' + port + '/_stcore/health', {
-            mode: 'no-cors',
-            signal: ctrl.signal,
-          });
-          clearTimeout(tid);
-          status.value = 'online';
-        } catch (_) {
-          status.value = 'offline';
-        }
+      function setOnline() {
+        status.value = 'online';
+        if (!iframeSrc.value) iframeSrc.value = url;
       }
 
-      onMounted(() => {
-        checkService();
-        pollTimer = setInterval(checkService, 15000);
-      });
+      function probe() {
+        status.value = 'loading';
+        var ctrl = new AbortController();
+        var tid = setTimeout(function () { ctrl.abort(); }, 4000);
+        fetch(url + '/_stcore/health', { signal: ctrl.signal })
+          .then(function (resp) {
+            clearTimeout(tid);
+            if (resp.ok) { setOnline(); } else { status.value = 'offline'; }
+          })
+          .catch(function () {
+            clearTimeout(tid);
+            var ctrl2 = new AbortController();
+            var tid2 = setTimeout(function () { ctrl2.abort(); }, 4000);
+            fetch(url + '/_stcore/health', { mode: 'no-cors', signal: ctrl2.signal })
+              .then(function () { clearTimeout(tid2); setOnline(); })
+              .catch(function () { clearTimeout(tid2); status.value = 'offline'; });
+          });
+      }
 
-      onUnmounted(() => {
-        if (pollTimer) clearInterval(pollTimer);
-      });
+      function retry() { probe(); }
 
-      return { streamlitUrl, status, checkService };
+      onMounted(function () { probe(); });
+
+      return { status, iframeSrc, retry };
     },
   };
 })();

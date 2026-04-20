@@ -1317,7 +1317,11 @@ function perfStatusEn(s) {
             managerId = midNum;
           } else {
             const midStr = String(mid).trim().toLowerCase();
-            const match = data.employees.find((e) =>
+            var match = data.employees.find((e) =>
+              String(e.name || '').trim().toLowerCase() === midStr
+              || String(e.id) === midStr,
+            );
+            if (!match) match = list.find((e) =>
               String(e.name || '').trim().toLowerCase() === midStr
               || String(e.id) === midStr,
             );

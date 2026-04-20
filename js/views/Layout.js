@@ -104,6 +104,7 @@
     onUnmounted(() => { window.removeEventListener('tm-toast', showToast); window.removeEventListener('tm-loading', onLoading); });
 
     const allHrbpMenuItems = [
+      { to: '/hrbp/ai-analyst', label: 'AI 数据分析', icon: 'fa-solid fa-robot', module: 'ai_analyst' },
       { to: '/hrbp/dashboard', label: '仪表盘', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
       { to: '/hrbp/roster', label: '花名册', icon: 'fa-solid fa-users', module: 'roster' },
       { to: '/hrbp/org', label: '组织管理', icon: 'fa-solid fa-sitemap', module: 'org' },
@@ -111,7 +112,6 @@
       { to: '/hrbp/talent', label: '人才盘点', icon: 'fa-solid fa-chess-board', module: 'talent' },
       { to: '/hrbp/performance', label: '绩效管理', icon: 'fa-solid fa-chart-line', module: 'performance' },
       { to: '/hrbp/attendance', label: '考勤管理', icon: 'fa-solid fa-clock', module: 'attendance' },
-      { to: '/hrbp/ai-analyst', label: 'AI 数据分析', icon: 'fa-solid fa-robot', module: 'ai_analyst' },
     ];
     const allAdminMenuItems = [
       { to: '/admin/users', label: '用户管理', icon: 'fa-solid fa-user-shield' },
@@ -127,6 +127,7 @@
     });
 
     const allMgrMenuItems = [
+      { to: '/manager/ai-analyst', label: 'AI 数据分析', icon: 'fa-solid fa-robot', module: 'ai_analyst' },
       { to: '/manager/dashboard', label: '仪表盘', icon: 'fa-solid fa-gauge-high', module: 'dashboard' },
       { to: '/manager/roster', label: '花名册', icon: 'fa-solid fa-people-group', module: 'roster' },
       { to: '/manager/org', label: '组织管理', icon: 'fa-solid fa-sitemap', module: 'org' },
@@ -134,7 +135,6 @@
       { to: '/manager/talent', label: '人才盘点', icon: 'fa-solid fa-chess-board', module: 'talent' },
       { to: '/manager/performance', label: '绩效管理', icon: 'fa-solid fa-clipboard-check', module: 'performance' },
       { to: '/manager/attendance', label: '考勤管理', icon: 'fa-solid fa-clock', module: 'attendance' },
-      { to: '/manager/ai-analyst', label: 'AI 数据分析', icon: 'fa-solid fa-robot', module: 'ai_analyst' },
     ];
     const mgrMenu = computed(() =>
       allMgrMenuItems.filter((item) => auth.canAccessModule(item.module)),

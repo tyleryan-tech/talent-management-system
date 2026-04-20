@@ -216,7 +216,7 @@
         if (newPloEid != null) {
           var emps = window.TM.loadKeyForLine(line.id, 'employees', null);
           var ploEmp = Array.isArray(emps) ? emps.find(function (e) { return e.id === Number(newPloEid); }) : null;
-          var existingUser = data.users.find(function (u) { return u.employeeId === Number(newPloEid); });
+          var existingUser = data.users.find(function (u) { return u.employeeId != null && Number(u.employeeId) === Number(newPloEid); });
           if (!existingUser && ploEmp) {
             var maxId = data.users.reduce(function (m, u) { return Math.max(m, Number(u.id) || 0); }, 0);
             var email = ploEmp.email || (ploEmp.name + '@company.com').toLowerCase().replace(/\s+/g, '');

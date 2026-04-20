@@ -869,10 +869,12 @@
           auth.persistSession();
         }
         data._markDirty('users'); data.persistAll();
+
+        var pendingId = _approvalPending.value;
         permModalOpen.value = false;
 
-        if (_approvalPending.value != null) {
-          var pending = data.users.find(function (x) { return x.id === _approvalPending.value; });
+        if (pendingId != null) {
+          var pending = data.users.find(function (x) { return x.id === pendingId; });
           if (pending && pending.rmStatus === 'pending_approval') {
             pending.rmStatus = 'active';
             if (pending.id === auth.currentUser?.id) {
@@ -881,7 +883,6 @@
             }
             data._markDirty('users'); data.persistAll();
             toast('RM 账号已审批激活', 'success');
-            _approvalPending.value = null;
             return;
           }
         }

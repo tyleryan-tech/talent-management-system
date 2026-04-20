@@ -15,10 +15,10 @@
   const { defineStore } = Pinia;
   const useDataStore = () => window.TM.useDataStore();
 
-  const HRBP_MODULES = ['dashboard', 'roster', 'org', 'recruitment', 'talent', 'performance', 'attendance'];
+  const HRBP_MODULES = ['dashboard', 'roster', 'org', 'recruitment', 'talent', 'performance', 'attendance', 'ai_analyst'];
   window.TM.HRBP_MODULES = HRBP_MODULES;
 
-  const MGR_MODULES = ['dashboard', 'roster', 'org', 'recruitment', 'talent', 'performance', 'attendance'];
+  const MGR_MODULES = ['dashboard', 'roster', 'org', 'recruitment', 'talent', 'performance', 'attendance', 'ai_analyst'];
   window.TM.MGR_MODULES = MGR_MODULES;
 
   /**
@@ -179,7 +179,7 @@
           } catch (e) {
             const code = e.body?.code || '';
             const status = e.status || 0;
-            const isServerDown = status === 0 || status === 404 || status === 500 || status === 502 || status === 503 || status === 504
+            const isServerDown = status === 0 || status === 404 || status === 405 || status === 500 || status === 501 || status === 502 || status === 503 || status === 504
               || code === 'TM_API_ORIGIN_MISSING' || code === 'UPSTREAM_UNREACHABLE'
               || code === 'FUNCTION_INVOCATION_FAILED';
             if (isServerDown) {

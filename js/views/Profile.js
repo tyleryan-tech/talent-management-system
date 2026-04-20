@@ -51,6 +51,11 @@
         msg.value = 'Passwords do not match';
         return;
       }
+      var userRow = data.users.find(function (u) { return u.id === auth.currentUser.id; });
+      if (!userRow) {
+        msg.value = '用户数据异常，无法更新密码';
+        return;
+      }
       data.updateUserPassword(auth.currentUser.id, pwd1.value);
       auth.currentUser.password = pwd1.value;
       auth.persistSession();

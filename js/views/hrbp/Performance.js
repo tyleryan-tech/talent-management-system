@@ -580,7 +580,7 @@
         const m = {};
         gradeOptions.forEach((g) => { m[g] = 0; });
         var DONE = { finalized: 1, calibrated: 1, pl_approved: 1, pl_pending: 1 };
-        filteredBase.value
+        evalRows.value
           .filter((r) => (DONE[r.status] && r.finalGrade) || (r.status !== 'rm_pending' && r.rmInitialGrade))
           .forEach((r) => {
             const g = String((DONE[r.status] && r.finalGrade) ? r.finalGrade : r.rmInitialGrade).trim();
@@ -720,7 +720,7 @@
         window.addEventListener('resize', scheduleChartDraw);
       });
       onUnmounted(() => { evalChart?.dispose(); window.removeEventListener('resize', scheduleChartDraw); });
-      watch([evalDist, () => hrScope.scopeRootDepartmentId, evalCycleId, rmFilter, levelFilter], () => { scheduleChartDraw(); });
+      watch([evalDist, () => hrScope.scopeRootDepartmentId, evalCycleId, rmFilter, levelFilter, evalStatusFilter], () => { scheduleChartDraw(); });
       watch(tab, (v) => { if (v === 'eval') nextTick(() => drawEvalChart()); });
 
       /* ── Remind: evaluation (rm_pending + in_approval) ── */
@@ -846,19 +846,19 @@
       }
 
       /* ── PL owner batch approve ── */
-      const plApproveCount = computed(() =>
-        evalRows.value.filter((r) => r.status === 'calibrated').length,
-      );
+      const plApproveCount = computed(() => {
+        if (!evalCycleId.value) return 0;
+        return data.performanceReviews.filter((r) => r.cycleId === evalCycleId.value && r.status === 'calibrated').length;
+      });
       function plHeadBatchApprove() {
         if (!evalCycleId.value) return;
-        const targets = evalRows.value.filter((r) => r.status === 'calibrated');
-        if (!targets.length) return;
-        if (!confirm(`确认批量审批 ${targets.length} 条已校准记录？`)) return;
+        var total = plApproveCount.value;
+        if (!total) return;
+        if (!confirm('确认批量审批本周期全部 ' + total + ' 条已校准记录？（不受当前筛选影响）')) return;
         const actor = auth.currentUser?.employeeId;
-        const ids = targets.map((r) => r.id);
-        const count = data.plHeadApproveReviews(evalCycleId.value, actor, ids);
+        const count = data.plHeadApproveReviews(evalCycleId.value, actor);
         window.dispatchEvent(new CustomEvent('tm-toast', {
-          detail: { message: `已审批 ${count} 条记录`, type: count ? 'success' : 'error' },
+          detail: { message: '已审批 ' + count + ' 条记录', type: count ? 'success' : 'error' },
         }));
       }
 

@@ -5,3 +5,6 @@ server/node_modules/
 *.db
 .DS_Store
 Thumbs.db
+__pycache__/
+ai-analyst/analyst.log
+ai-analyst/chat_history.json

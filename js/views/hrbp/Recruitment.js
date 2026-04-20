@@ -287,6 +287,8 @@
     const total = cands.length;
     const hrDecided = cands.filter((c) => c.hrScreening === 'pass' || c.hrScreening === 'fail').length;
     const hrPass = cands.filter((c) => c.hrScreening === 'pass').length;
+    const hrIvDecided = cands.filter((c) => c.hrInterview === 'pass' || c.hrInterview === 'fail').length;
+    const hrIvPass = cands.filter((c) => c.hrInterview === 'pass').length;
     const r1Decided = cands.filter((c) => c.interview1 === 'pass' || c.interview1 === 'fail').length;
     const r1Pass = cands.filter((c) => c.interview1 === 'pass').length;
     const r2Decided = cands.filter((c) => c.interview2 === 'pass' || c.interview2 === 'fail').length;
@@ -300,6 +302,7 @@
     return {
       total,
       hrPassRate: pct(hrPass, hrDecided), hrPass, hrDecided,
+      hrIvPassRate: pct(hrIvPass, hrIvDecided), hrIvPass, hrIvDecided,
       r1PassRate: pct(r1Pass, r1Decided), r1Pass, r1Decided,
       r2PassRate: pct(r2Pass, r2Decided), r2Pass, r2Decided,
       rfPassRate: pct(rfPass, rfDecided), rfPass, rfDecided,
@@ -603,7 +606,7 @@
               <tr>
                 <th v-if="pivotGroupBy">{{ pivotGroupLabel }}</th>
                 <th>Total</th>
-                <th>简历筛选通过率</th><th>一面通过率</th><th>二面通过率</th><th>终面通过率</th>
+                <th>简历筛选通过率</th><th>HR面试通过率</th><th>一面通过率</th><th>二面通过率</th><th>终面通过率</th>
                 <th>≥3分占比</th><th>≥4分占比</th><th>≥5分占比</th>
               </tr>
             </thead>
@@ -612,6 +615,7 @@
                 <td v-if="pivotGroupBy" style="font-weight:600">{{ row._key }}</td>
                 <td>{{ row.total }}</td>
                 <td>{{ row.hrPassRate }} <span class="muted small">({{ row.hrPass }}/{{ row.hrDecided }})</span></td>
+                <td>{{ row.hrIvPassRate }} <span class="muted small">({{ row.hrIvPass }}/{{ row.hrIvDecided }})</span></td>
                 <td>{{ row.r1PassRate }} <span class="muted small">({{ row.r1Pass }}/{{ row.r1Decided }})</span></td>
                 <td>{{ row.r2PassRate }} <span class="muted small">({{ row.r2Pass }}/{{ row.r2Decided }})</span></td>
                 <td>{{ row.rfPassRate }} <span class="muted small">({{ row.rfPass }}/{{ row.rfDecided }})</span></td>
@@ -620,7 +624,7 @@
                 <td>{{ row.score5Pct }} <span class="muted small">({{ row.score5 }}/{{ row.scored }})</span></td>
               </tr>
               <tr v-if="!pivotRows.length">
-                <td :colspan="pivotGroupBy ? 9 : 8" class="muted small" style="text-align:center">无匹配数据</td>
+                <td :colspan="pivotGroupBy ? 10 : 9" class="muted small" style="text-align:center">无匹配数据</td>
               </tr>
             </tbody>
           </table>
@@ -967,9 +971,15 @@
         mapping.forEach((m) => { if (m.header) headerToField[m.header] = m.fieldKey; });
         const stageKeys = new Set(['hrScreening','hrInterview','interview1','interview2','interviewFinal']);
         const dateKeys = new Set(['recruitDate','onboardDate','shippedDate','offerBIDate','briStart']);
+        var kept = [];
+        if (_zs.isManagerZone.value && _teamDeptNames.value) {
+          const teamNames = _teamDeptNames.value;
+          kept = (data.recruitmentPipeline || []).filter((r) => !teamNames.has(String(r.team || '').trim()));
+        }
         const list = [];
-        json.forEach((row, i) => {
-          const r = emptyPipeRow('P' + String(i + 1).padStart(3, '0'));
+        var combined = [...kept];
+        json.forEach((row) => {
+          const r = emptyPipeRow(pipeUid(combined));
           Object.keys(row).forEach((h) => {
             const fk = headerToField[h];
             if (!fk) return;
@@ -982,11 +992,9 @@
             else if (dateKeys.has(fk)) { r[fk] = cellToDateString(row[h]); }
             else { r[fk] = String(row[h] ?? '').trim(); }
           });
-          if (r.name) list.push(r);
+          if (r.name) { list.push(r); combined.push(r); }
         });
         if (_zs.isManagerZone.value && _teamDeptNames.value) {
-          const teamNames = _teamDeptNames.value;
-          const kept = (data.recruitmentPipeline || []).filter((r) => !teamNames.has(String(r.team || '').trim()));
           data.recruitmentPipeline = kept.concat(list);
         } else {
           data.recruitmentPipeline = list;

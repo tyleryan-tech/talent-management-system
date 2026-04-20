@@ -20,7 +20,8 @@
   function managersPathUpwards(departments, startDeptId) {
     const ids = [];
     const seen = new Set();
-    let cur = (departments || []).find((d) => d.id === startDeptId);
+    const startN = Number(startDeptId);
+    let cur = (departments || []).find((d) => Number(d.id) === startN);
     while (cur) {
       if (cur.managerId != null) {
         const m = Number(cur.managerId);
@@ -29,7 +30,7 @@
           ids.push(m);
         }
       }
-      cur = cur.parentId != null ? (departments || []).find((d) => d.id === cur.parentId) : null;
+      cur = cur.parentId != null ? (departments || []).find((d) => Number(d.id) === Number(cur.parentId)) : null;
     }
     return ids;
   }

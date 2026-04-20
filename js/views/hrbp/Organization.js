@@ -888,7 +888,7 @@
       return deptName(pid);
     }
     function empName(eid) {
-      return data._empMap.get(eid)?.name || '—';
+      return data._empMap.get(Number(eid))?.name || data._empMap.get(eid)?.name || '—';
     }
     function posName(id) {
       return data._posMap.get(id)?.name || '-';
@@ -1237,15 +1237,13 @@
               level,
               reportingManagerId: reportingManagerId ? Number(reportingManagerId) : null,
               markRecruitAfter: !!posMarkRecruitAfterCreate.value,
+              createRecruitReq: !!posCreateRecruitReq.value,
             },
             submitter: submitter.value,
           });
           if (result) {
             created++;
             lastResult = result;
-            if (posCreateRecruitReq.value && result.status === 'approved') {
-              data.setPositionRecruitTagged(depId, result.payload?.createdId || 0, true);
-            }
           }
         }
         if (created > 0) {

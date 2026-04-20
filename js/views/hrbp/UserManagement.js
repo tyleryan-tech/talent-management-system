@@ -759,6 +759,11 @@
             }
             if (!user.rmStatus) user.rmStatus = 'pending_approval';
           }
+          var plhEid = data.orgSettings?.productLineHeadEmployeeId;
+          if (f.role !== 'product_line_owner' && user.employeeId != null && plhEid != null && Number(plhEid) === Number(user.employeeId)) {
+            data.orgSettings = { ...data.orgSettings, productLineHeadEmployeeId: null };
+            data._markDirty('orgSettings');
+          }
           if (user.id === auth.currentUser?.id) {
             auth.currentUser = { ...auth.currentUser, ...user };
             auth.persistSession();

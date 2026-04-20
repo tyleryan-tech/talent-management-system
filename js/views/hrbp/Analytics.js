@@ -242,7 +242,7 @@
               <h3 class="section-title">Hire year distribution</h3>
               <button type="button" class="chart-hide-btn" @click="chartPrefs.toggleVisibility('anl-hire-year')" title="Hide"><i class="fa-solid fa-eye-slash"></i></button>
             </div>
-            <p class="muted small">Active headcount by hire year. Uses the same <strong>Rank</strong> filter as work experience (organization bar above).</p>
+            <p class="muted small">Active headcount by hire year (independent filter).</p>
             <div ref="cHireYear" class="chart-box"></div>
           </div>
         </template>
@@ -823,7 +823,24 @@
         });
       }
 
+      function ensureChart(instance, domRef) {
+        if (!echartsLib || !domRef) return null;
+        if (instance && instance.getDom() === domRef && !instance.isDisposed?.()) return instance;
+        if (instance && !instance.isDisposed?.()) { try { instance.dispose(); } catch (_) {} }
+        var c = echartsLib.init(domRef);
+        if (charts.indexOf(instance) >= 0) charts.splice(charts.indexOf(instance), 1);
+        charts.push(c);
+        return c;
+      }
+
       function redrawAll() {
+        chTradeHc = ensureChart(chTradeHc, cTradeHc.value);
+        chLevelHc = ensureChart(chLevelHc, cLevelHc.value);
+        chTenure = ensureChart(chTenure, cTenure.value);
+        chHireYear = ensureChart(chHireYear, cHireYear.value);
+        chDevTest = ensureChart(chDevTest, cDevTest.value);
+        chAvgTenureDim = ensureChart(chAvgTenureDim, cAvgTenureDim.value);
+        chTrend = ensureChart(chTrend, cTrend.value);
         drawTenure();
         drawHireYear();
         drawDevTest();

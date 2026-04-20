@@ -588,7 +588,10 @@ window.TM.useDataStore = defineStore('data', {
     // 员工
     addEmployee(row) {
       const id = uid(this.employees);
-      this.employees.push({ ...EMPLOYEE_EXTRA_DEFAULTS, ...row, id });
+      var clean = { ...EMPLOYEE_EXTRA_DEFAULTS, ...row, id };
+      if (clean.positionId != null && (Number.isNaN(Number(clean.positionId)) || clean.positionId === '')) clean.positionId = null;
+      if (clean.departmentId != null && (Number.isNaN(Number(clean.departmentId)) || clean.departmentId === '')) clean.departmentId = null;
+      this.employees.push(clean);
       this.syncEmployeeLinkedDataFromRoster();
       this._markDirty('employees', 'talentMatrix', 'notifications');
       this.persistAll();
@@ -959,6 +962,9 @@ window.TM.useDataStore = defineStore('data', {
           }
           payload.createdId = nid;
           if (payload.markRecruitAfter) {
+            this.setPositionRecruitTagged(Number(payload.departmentId), nid, true);
+          }
+          if (payload.createRecruitReq) {
             this.setPositionRecruitTagged(Number(payload.departmentId), nid, true);
           }
           break;
@@ -1435,7 +1441,8 @@ window.TM.useDataStore = defineStore('data', {
     recordCommunication(reviewId, notes) {
       const i = this.performanceReviews.findIndex((x) => x.id === reviewId);
       if (i < 0) return false;
-      if (this.performanceReviews[i].status !== 'finalized') return false;
+      var st = this.performanceReviews[i].status;
+      if (st !== 'finalized' && st !== 'pl_approved') return false;
       const today = new Date().toISOString().slice(0, 10);
       const d = new Date();
       d.setDate(d.getDate() + 3);
@@ -1458,6 +1465,7 @@ window.TM.useDataStore = defineStore('data', {
       if (r.status !== 'finalized') return false;
       if (!r.communicatedAt) return false;
       if (r.appealStatus === 'pending' || r.appealStatus === 'approved' || r.appealStatus === 'rejected') return false;
+      if (r.appealDeadline && new Date().toISOString().slice(0, 10) > r.appealDeadline) return false;
       const today = new Date().toISOString().slice(0, 10);
       const log = [...(r.approvalLog || []), {
         approverId: null, at: today, action: 'appeal', note: '员工发起申诉：' + String(reason || '').trim(),
