@@ -137,9 +137,15 @@ class HRDatabase:
                 db_path = os.path.join(os.path.dirname(__file__), db_path)
                 database_url = f"sqlite:///{db_path}"
             if not os.path.exists(db_path):
-                raise FileNotFoundError(
-                    f"数据库文件不存在：{db_path}\n请先运行 python init_db.py 生成数据库。"
-                )
+                logger.info("数据库文件不存在，自动初始化：%s", db_path)
+                try:
+                    from init_db import main as _init_main
+                    _init_main()
+                except Exception as init_err:
+                    raise FileNotFoundError(
+                        f"数据库自动初始化失败：{init_err}\n"
+                        f"请手动运行 python init_db.py 生成数据库。"
+                    ) from init_err
             connect_args["check_same_thread"] = False
         else:
             kwargs.update(pool_pre_ping=True, pool_size=5, max_overflow=2)

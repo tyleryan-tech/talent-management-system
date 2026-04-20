@@ -4,6 +4,15 @@
 (function () {
   const { ref, onMounted } = Vue;
 
+  function resolveAnalystUrl() {
+    var meta = document.querySelector('meta[name="tm-ai-analyst-url"]');
+    var val = meta ? (meta.getAttribute('content') || '').trim() : '';
+    if (!val || val === '__LOCAL__') {
+      return 'http://localhost:8501';
+    }
+    return val.replace(/\/+$/, '');
+  }
+
   window.TM.HrbpAiAnalyst = {
     name: 'HrbpAiAnalyst',
     template: `
@@ -60,7 +69,7 @@
       </div>
     `,
     setup() {
-      var url = 'http://localhost:8501';
+      var url = resolveAnalystUrl();
       var status = ref('loading');
       var iframeSrc = ref(null);
 

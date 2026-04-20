@@ -216,13 +216,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+def _cfg(key: str, default: str = "") -> str:
+    """Read config: Streamlit secrets → env var → default."""
+    try:
+        return st.secrets[key]
+    except (KeyError, FileNotFoundError):
+        return os.getenv(key, default)
+
+
 # ── 单例初始化 ─────────────────────────────────────────
 @st.cache_resource(show_spinner="正在连接数据库与 AI 服务…")
 def init_services():
-    db_url = os.getenv("DATABASE_URL", "")
-    api_key = os.getenv("DEEPSEEK_API_KEY", "")
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    db_url = _cfg("DATABASE_URL")
+    api_key = _cfg("DEEPSEEK_API_KEY")
+    base_url = _cfg("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+    model = _cfg("DEEPSEEK_MODEL", "deepseek-chat")
 
     errors = []
     if not db_url:

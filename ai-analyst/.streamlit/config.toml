@@ -1,6 +1,8 @@
 [server]
 fileWatcherType = "none"
 runOnSave = false
+enableCORS = false
+enableXsrfProtection = false
 
 [theme]
 primaryColor = "#4f46e5"
