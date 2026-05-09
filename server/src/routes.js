@@ -15,6 +15,9 @@ const {
 } = require('./db');
 const { shapeWorkspaceForReader, hasFullWorkspaceAccess } = require('./workspaceScope');
 const { validateAndApplyPatch } = require('./workspacePatch');
+const { buildAiSession, resolveAiAccess } = require('./aiAnalystAccess');
+const { buildAiDataset, buildDataProfile } = require('./aiDataset');
+const { answerQuestion, isAiModelConfigured, modelConfig } = require('./aiService');
 
 const loginLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -32,6 +35,8 @@ const apiLimiter = rateLimit({
   message: { error: '请求过于频繁，请稍后重试', code: 'RATE_LIMIT' },
 });
 
+const DEFAULT_AI_ANALYST_URL = 'https://talent-management-system-wrprc98deuzvydwtl4m5gq.streamlit.app';
+
 function requireFullWorkspaceWriter(req, res, next) {
   if (hasFullWorkspaceAccess(req.authUser)) {
     next();
@@ -43,6 +48,91 @@ function requireFullWorkspaceWriter(req, res, next) {
   });
 }
 
+function resolveAiAnalystUrl() {
+  return String(
+    process.env.TM_AI_ANALYST_URL
+    || process.env.AI_ANALYST_URL
+    || DEFAULT_AI_ANALYST_URL,
+  ).trim().replace(/\/+$/, '');
+}
+
+function toAiAnalystEmbedUrl(rawUrl) {
+  const u = new URL(rawUrl);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw new Error('AI_ANALYST_URL 协议无效');
+  }
+  u.searchParams.set('embed', 'true');
+  return u.toString();
+}
+
+function toAiAnalystWakeUrl(rawUrl) {
+  const u = new URL(rawUrl);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw new Error('AI_ANALYST_URL 协议无效');
+  }
+  u.searchParams.delete('embed');
+  return u.toString();
+}
+
+async function fetchTextWithTimeout(url, timeoutMs) {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        accept: 'text/html,application/xhtml+xml',
+        'user-agent': 'TalentHub/ai-analyst-status',
+      },
+    });
+    const text = await resp.text();
+    return { ok: resp.ok, status: resp.status, text };
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+function buildNativeAiContext(access, shaped) {
+  return {
+    user: {
+      id: access.actor.id ?? null,
+      username: access.actor.username || '',
+      email: access.actor.email || '',
+      role: access.actor.role || '',
+      realName: access.actor.realName || access.actor.real_name || '',
+      employeeId: access.actor.employeeId ?? access.actor.employee_id ?? null,
+      superAdmin: access.actor.superAdmin === true,
+      hrbpSubType: access.actor.hrbpSubType || null,
+    },
+    productLine: {
+      id: access.lineId,
+      name: access.line.name,
+    },
+    permissions: {
+      modules: ['ai_analyst'],
+      scope: shaped.scope || 'full',
+      scopeRootDepartmentId: shaped.scopeRootDepartmentId ?? null,
+    },
+  };
+}
+
+function resolveNativeAiRequest(db, authUser, options) {
+  const access = resolveAiAccess(db, authUser, {
+    lineId: options.lineId,
+    scopeRootDepartmentId: options.scopeRootDepartmentId,
+  });
+  if (!access.ok) return { access };
+  const shaped = shapeWorkspaceForReader(
+    access.workspace,
+    access.actor,
+    options.scopeRootDepartmentId,
+  );
+  const context = buildNativeAiContext(access, shaped);
+  const dataset = buildAiDataset(shaped.data || {}, context, options.question || '');
+  return { access, shaped, context, dataset };
+}
+
 function createRouter(db, broadcastLine) {
   const r = express.Router();
   r.use(apiLimiter);
@@ -50,6 +140,165 @@ function createRouter(db, broadcastLine) {
   /** 与根路径 /health 一致，便于仅反代 /api/* 的网关做存活检查 */
   r.get('/health', (req, res) => {
     res.json({ ok: true, service: 'talent-hub-server' });
+  });
+
+  r.get('/ai-analyst/context', authMiddleware(db), (req, res) => {
+    try {
+      const out = resolveNativeAiRequest(db, req.authUser, {
+        lineId: req.query.lineId,
+        scopeRootDepartmentId: req.query.scopeRootDepartmentId,
+      });
+      if (!out.access.ok) {
+        res.status(out.access.status || 403).json({
+          ok: false,
+          error: out.access.error || '无权访问 AI 数据分析',
+          code: out.access.code || 'AI_ANALYST_FORBIDDEN',
+        });
+        return;
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        mode: 'native',
+        aiConfigured: isAiModelConfigured(),
+        model: isAiModelConfigured() ? modelConfig().model : null,
+        context: out.context,
+        dataProfile: buildDataProfile(out.dataset),
+      });
+    } catch (e) {
+      res.status(500).json({
+        ok: false,
+        error: e.message || 'AI 分析上下文加载失败',
+        code: 'AI_CONTEXT_FAILED',
+      });
+    }
+  });
+
+  r.post('/ai-analyst/chat', authMiddleware(db), async (req, res) => {
+    try {
+      const body = req.body || {};
+      const question = String(body.question || '').trim();
+      const out = resolveNativeAiRequest(db, req.authUser, {
+        lineId: body.lineId,
+        scopeRootDepartmentId: body.scopeRootDepartmentId,
+        question,
+      });
+      if (!out.access.ok) {
+        res.status(out.access.status || 403).json({
+          ok: false,
+          error: out.access.error || '无权访问 AI 数据分析',
+          code: out.access.code || 'AI_ANALYST_FORBIDDEN',
+        });
+        return;
+      }
+      const answer = await answerQuestion(question, out.dataset, out.context);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        ...answer,
+        context: out.context,
+        dataProfile: buildDataProfile(out.dataset),
+      });
+    } catch (e) {
+      res.status(e.status || 500).json({
+        ok: false,
+        error: e.message || 'AI 分析失败',
+        code: e.code || 'AI_CHAT_FAILED',
+      });
+    }
+  });
+
+  r.get('/ai-analyst/status', authMiddleware(db), async (req, res) => {
+    let embedUrl = '';
+    let wakeUrl = '';
+    try {
+      const access = resolveAiAccess(db, req.authUser, {
+        lineId: req.query.lineId,
+        scopeRootDepartmentId: req.query.scopeRootDepartmentId,
+      });
+      if (!access.ok) {
+        res.status(access.status || 403).json({
+          ok: false,
+          error: access.error || '无权访问 AI 数据分析',
+          code: access.code || 'AI_ANALYST_FORBIDDEN',
+          reachable: false,
+          sleeping: null,
+        });
+        return;
+      }
+      const url = resolveAiAnalystUrl();
+      embedUrl = toAiAnalystEmbedUrl(url);
+      wakeUrl = toAiAnalystWakeUrl(url);
+      const out = await fetchTextWithTimeout(embedUrl, 8000);
+      const text = out.text || '';
+      const sleeping = /\bZzzz\b|gone to sleep due to inactivity/i.test(text);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        ok: out.ok,
+        reachable: out.ok,
+        status: out.status,
+        sleeping,
+        url,
+        embedUrl,
+        wakeUrl,
+      });
+    } catch (e) {
+      res.status(502).json({
+        ok: false,
+        reachable: false,
+        sleeping: null,
+        embedUrl,
+        wakeUrl,
+        error: 'AI 分析服务状态检测失败',
+        code: 'AI_ANALYST_STATUS_FAILED',
+      });
+    }
+  });
+
+  r.get('/ai-analyst/session', authMiddleware(db), async (req, res) => {
+    let embedUrl = '';
+    let wakeUrl = '';
+    try {
+      const url = resolveAiAnalystUrl();
+      embedUrl = toAiAnalystEmbedUrl(url);
+      wakeUrl = toAiAnalystWakeUrl(url);
+      const out = buildAiSession(db, req.authUser, {
+        lineId: req.query.lineId,
+        scopeRootDepartmentId: req.query.scopeRootDepartmentId,
+      });
+      if (!out.ok) {
+        res.status(out.status || 403).json({
+          ok: false,
+          error: out.error || '无权访问 AI 数据分析',
+          code: out.code || 'AI_ANALYST_FORBIDDEN',
+          embedUrl,
+          wakeUrl,
+        });
+        return;
+      }
+      const embed = new URL(embedUrl);
+      embed.searchParams.set('tm_ctx', out.contextToken);
+      embed.searchParams.set('lineId', String(out.context.productLine.id));
+      const wake = new URL(wakeUrl);
+      wake.searchParams.set('tm_ctx', out.contextToken);
+      wake.searchParams.set('lineId', String(out.context.productLine.id));
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        ok: true,
+        url,
+        embedUrl: embed.toString(),
+        wakeUrl: wake.toString(),
+        context: out.context,
+      });
+    } catch (e) {
+      res.status(500).json({
+        ok: false,
+        error: e.message || 'AI 分析会话创建失败',
+        code: 'AI_ANALYST_SESSION_FAILED',
+        embedUrl,
+        wakeUrl,
+      });
+    }
   });
 
   r.post('/auth/login', loginLimiter, async (req, res) => {

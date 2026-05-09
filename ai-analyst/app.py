@@ -5,6 +5,7 @@ app.py — Streamlit 对话界面（HR AI 数据分析助手）
 """
 
 import hashlib
+import html
 import json
 import logging
 import os
@@ -32,6 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger("ai-analyst.app")
 
 from analyst import HRAnalyst
+from auth_context import context_label, verify_context_token
 from database import HRDatabase
 
 # ── 页面配置 ───────────────────────────────────────────
@@ -258,8 +260,61 @@ def init_services():
 
 db, llm, schema, init_errors = init_services()
 
+
+def _bool_cfg(key: str, default: bool = False) -> bool:
+    raw = _cfg(key, "true" if default else "false")
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _query_param(key: str) -> str:
+    try:
+        val = st.query_params.get(key, "")
+        if isinstance(val, list):
+            return str(val[0] if val else "")
+        return str(val or "")
+    except Exception:
+        try:
+            val = st.experimental_get_query_params().get(key, [""])
+            return str(val[0] if val else "")
+        except Exception:
+            return ""
+
+
+def _load_auth_context() -> tuple[dict | None, str | None]:
+    required = _bool_cfg("AI_ANALYST_AUTH_REQUIRED", True)
+    token = _query_param("tm_ctx")
+    if not required and not token:
+        return None, None
+    secret = _cfg("AI_ANALYST_SESSION_SECRET") or _cfg("JWT_SECRET")
+    try:
+        return verify_context_token(token, secret), None
+    except PermissionError as e:
+        return None, str(e)
+
+
+auth_context, auth_error = _load_auth_context()
+if auth_error:
+    st.error(auth_error)
+    st.info("请从人才管理主系统的「AI 数据分析」菜单进入。")
+    st.stop()
+
 # ── 聊天历史持久化 ────────────────────────────────────
 _HISTORY_PATH = Path(__file__).parent / "chat_history.json"
+_MAX_HISTORY_MESSAGES = 40
+_MAX_QUESTION_CHARS = 500
+
+
+def _normalise_messages(messages: list[dict]) -> list[dict]:
+    clean: list[dict] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role not in {"user", "assistant"} or not isinstance(content, str):
+            continue
+        clean.append({"role": role, "content": content})
+    return clean[-_MAX_HISTORY_MESSAGES:]
 
 
 def _load_history() -> list[dict]:
@@ -267,7 +322,7 @@ def _load_history() -> list[dict]:
         if _HISTORY_PATH.exists():
             data = json.loads(_HISTORY_PATH.read_text(encoding="utf-8"))
             if isinstance(data, list):
-                return data
+                return _normalise_messages(data)
     except Exception:
         logger.warning("读取聊天历史失败，已忽略")
     return []
@@ -275,18 +330,21 @@ def _load_history() -> list[dict]:
 
 def _save_history(messages: list[dict]):
     try:
+        messages = _normalise_messages(messages)
         _HISTORY_PATH.write_text(
             json.dumps(messages, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        st.session_state.messages = messages
     except Exception:
         logger.warning("保存聊天历史失败")
 
 
 # ── 缓存层：查询计划缓存（相同问题 10 分钟内复用）──────
 @st.cache_data(ttl=600, show_spinner=False)
-def cached_plan_queries(_schema_hash: str, question: str) -> list[dict]:
-    return llm.plan_queries(schema, question, stream=False)
+def cached_plan_queries(_schema_hash: str, question: str, auth_context_key: str) -> list[dict]:
+    ctx = json.loads(auth_context_key) if auth_context_key else None
+    return llm.plan_queries(schema, question, stream=False, auth_context=ctx)
 
 
 def _question_hash(q: str) -> str:
@@ -311,6 +369,9 @@ with st.sidebar:
         '<span class="status-ok">● AI 服务就绪</span>',
         unsafe_allow_html=True,
     )
+    label = context_label(auth_context)
+    if label:
+        st.caption(label)
 
     st.divider()
     st.markdown("**常见问题**")
@@ -349,19 +410,24 @@ if "messages" not in st.session_state:
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"], unsafe_allow_html=True)
+        st.markdown(msg["content"])
 
 # ── 辅助：渲染 Markdown 表格 ──────────────────────────
+def _md_cell(value) -> str:
+    s = "" if value is None else str(value)
+    return html.escape(s).replace("|", "\\|").replace("\n", " ")
+
+
 def render_table(rows, columns):
     if not rows:
         return
-    header = "| " + " | ".join(str(c) for c in columns) + " |"
+    header = "| " + " | ".join(_md_cell(c) for c in columns) + " |"
     sep = "| " + " | ".join("---" for _ in columns) + " |"
     body = "\n".join(
-        "| " + " | ".join(str(row.get(c, "")) for c in columns) + " |"
+        "| " + " | ".join(_md_cell(row.get(c, "")) for c in columns) + " |"
         for row in rows[:50]
     )
-    st.markdown(f"{header}\n{sep}\n{body}", unsafe_allow_html=True)
+    st.markdown(f"{header}\n{sep}\n{body}")
     if len(rows) > 50:
         st.caption(f"（仅显示前 50 行，共 {len(rows)} 行）")
 
@@ -369,16 +435,22 @@ def render_table(rows, columns):
 # ── 处理输入 ──────────────────────────────────────────
 pending = st.session_state.pop("pending_question", None)
 user_input = st.chat_input("请输入您的问题，例如：帮我分析一下研发部门的整体情况")
-question = pending or user_input
+question = (pending or user_input or "").strip()
 
 if question:
+    if len(question) > _MAX_QUESTION_CHARS:
+        st.warning(f"问题过长，请控制在 {_MAX_QUESTION_CHARS} 个字符以内。")
+        st.stop()
+
     st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.messages = _normalise_messages(st.session_state.messages)
     with st.chat_message("user"):
         st.markdown(question)
 
     with st.chat_message("assistant"):
         answer_parts: list[str] = []
         schema_h = _question_hash(schema or "")
+        auth_context_key = json.dumps(auth_context or {}, ensure_ascii=False, sort_keys=True)
 
         # ── Step 1: 意图理解 + 查询计划（带缓存）────────
         with st.status(
@@ -386,11 +458,13 @@ if question:
         ) as status:
             try:
                 t0 = time.time()
-                queries = cached_plan_queries(schema_h, question)
+                queries = cached_plan_queries(schema_h, question, auth_context_key)
                 t_plan = time.time() - t0
                 n = len(queries)
                 dims = "、".join(q["label"] for q in queries)
                 cache_hint = "（缓存）" if t_plan < 0.5 else ""
+                if not queries:
+                    raise RuntimeError("未生成可执行查询计划")
                 status.update(
                     label=f"✅ 已分解为 {n} 个查询维度（{t_plan:.1f}s{cache_hint}）：{dims}",
                     state="complete",
@@ -454,13 +528,15 @@ if question:
             ):
                 for i, qr in enumerate(query_results):
                     result = qr["result"]
+                    safe_label = html.escape(str(qr["label"]))
+                    safe_sql = html.escape(str(qr["sql"]))
                     st.markdown(
-                        f'<p class="dim-header">📌 {qr["label"]}'
+                        f'<p class="dim-header">📌 {safe_label}'
                         f'（{result["row_count"]} 行）</p>',
                         unsafe_allow_html=True,
                     )
                     st.markdown(
-                        f'<div class="sql-box">{qr["sql"]}</div>',
+                        f'<div class="sql-box">{safe_sql}</div>',
                         unsafe_allow_html=True,
                     )
                     if result["rows"]:
@@ -488,7 +564,7 @@ if question:
         report_placeholder = st.empty()
         try:
             t0 = time.time()
-            stream_gen = llm.synthesize(question, query_results, stream=True)
+            stream_gen = llm.synthesize(question, query_results, stream=True, auth_context=auth_context)
             chunks: list[str] = []
             for chunk in stream_gen:
                 chunks.append(chunk)
@@ -508,7 +584,7 @@ if question:
         answer_parts.append(summary_text)
 
         # ── 复制按钮 ──
-        _encoded = _url_quote(summary_text)
+        _encoded = _url_quote(summary_text, safe="")
         st.markdown(
             f'<button class="copy-report-btn" onclick="'
             f"navigator.clipboard.writeText(decodeURIComponent(this.dataset.text))"

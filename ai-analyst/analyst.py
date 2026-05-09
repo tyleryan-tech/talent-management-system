@@ -9,7 +9,12 @@ from typing import Any, Generator
 
 from openai import OpenAI
 
+from hr_knowledge import build_hr_context
+
 logger = logging.getLogger("ai-analyst.llm")
+
+_MAX_QUERY_PLAN_ITEMS = 6
+_MAX_LABEL_CHARS = 48
 
 # ── HR 领域知识（精简版）────────────────────────────────
 HR_DOMAIN_KNOWLEDGE = """
@@ -51,9 +56,10 @@ class HRAnalyst:
 
     # ── 核心：意图理解 + 多查询计划生成（支持 streaming）────
     def plan_queries(
-        self, schema: str, question: str, *, stream: bool = False
+        self, schema: str, question: str, *, stream: bool = False, auth_context: dict | None = None
     ) -> "list[dict] | Generator[str, None, list[dict]]":
         compact_schema = compress_schema(schema)
+        hr_context = build_hr_context(question, auth_context)
         system_prompt = (
             "你是资深HR数据分析师，精通Text-to-SQL。理解用户意图，分解为多个查询维度，每个维度生成一条SQL。\n\n"
             "【输出格式——严格JSON数组】\n"
@@ -61,6 +67,7 @@ class HRAnalyst:
             "只返回JSON数组，无其他文字，不用Markdown代码块。\n\n"
             "【查询数量】简单1-2条，一般2-3条，综合4-6条，最多6条。\n\n"
             f"{HR_DOMAIN_KNOWLEDGE}\n\n"
+            f"{hr_context}\n\n"
             "【SQL规则】只SELECT；末尾LIMIT(明细100,统计50)；表名字段名双引号；ASCII运算符；绩效取status='finalized'。\n"
             "【SQLite语法】date('now') | date('now','-6 months') | julianday('now')-julianday(col) | strftime('%Y',col) | ROUND(expr,n)\n\n"
             f"【Schema】\n{compact_schema}"
@@ -81,7 +88,7 @@ class HRAnalyst:
 
         raw = response.choices[0].message.content.strip()
         logger.info("LLM 查询计划原始输出：%s", raw[:500])
-        return self._finalize_plan(raw)
+        return self._finalize_plan(raw, question)
 
     def _plan_queries_stream(
         self, system_prompt: str, question: str
@@ -105,14 +112,18 @@ class HRAnalyst:
                 yield delta
         raw = "".join(chunks).strip()
         logger.info("LLM 查询计划原始输出（stream）：%s", raw[:500])
-        return self._finalize_plan(raw)
+        return self._finalize_plan(raw, question)
 
-    def _finalize_plan(self, raw: str) -> list[dict]:
+    def _finalize_plan(self, raw: str, question: str = "") -> list[dict]:
         queries = self._parse_query_plan(raw)
         if not queries:
             logger.warning("多查询解析失败，回退到单查询模式")
             sql = self._extract_sql(raw)
-            queries = [{"label": "查询结果", "sql": sql}]
+            if sql.upper().startswith("SELECT"):
+                queries = [{"label": "查询结果", "sql": sql}]
+        if not queries:
+            logger.warning("未提取到可执行 SELECT，使用内置兜底查询")
+            queries = self._fallback_queries(question)
         logger.info("查询计划：%d 条查询", len(queries))
         return queries
 
@@ -123,6 +134,7 @@ class HRAnalyst:
         query_results: list[dict[str, Any]],
         *,
         stream: bool = False,
+        auth_context: dict | None = None,
     ) -> "str | Generator[str, None, None]":
         data_sections = []
         total_rows = 0
@@ -153,11 +165,13 @@ class HRAnalyst:
                 return _empty()
             return msg
 
+        hr_context = build_hr_context(question, auth_context)
         system_prompt = (
             "你是资深HR数据分析专家，擅长从多维度数据提炼业务洞察。\n"
             "综合所有维度数据生成分析报告。结构：\n"
             "1.**核心结论**(1-2句) 2.**多维度分析**(具体数字,交叉分析) 3.**风险提示** 4.**管理建议**(2-4条)\n"
-            "格式：Markdown排版，数字精确(如35.2%)，对比用表格，全程中文，脱敏字段不还原。"
+            "格式：Markdown排版，数字精确(如35.2%)，对比用表格，全程中文，脱敏字段不还原。\n\n"
+            f"{hr_context}"
         )
 
         user_msg = (
@@ -231,12 +245,19 @@ class HRAnalyst:
             return []
 
         queries = []
+        seen_sql: set[str] = set()
         for item in data:
             if isinstance(item, dict) and "sql" in item:
-                label = item.get("label", f"查询 {len(queries)+1}")
-                sql = item["sql"].strip()
-                if sql.upper().startswith("SELECT"):
+                label = HRAnalyst._clean_label(
+                    item.get("label", f"查询 {len(queries)+1}")
+                )
+                sql = HRAnalyst._clean_sql(str(item["sql"]))
+                sql_key = re.sub(r"\s+", " ", sql).strip().lower()
+                if sql.upper().startswith("SELECT") and sql_key not in seen_sql:
                     queries.append({"label": label, "sql": sql})
+                    seen_sql.add(sql_key)
+                if len(queries) >= _MAX_QUERY_PLAN_ITEMS:
+                    break
         return queries
 
     @staticmethod
@@ -245,10 +266,110 @@ class HRAnalyst:
             r"```(?:sql)?\s*\n?(.*?)```", raw, re.DOTALL | re.IGNORECASE
         )
         if md_match:
-            return md_match.group(1).strip()
+            return HRAnalyst._clean_sql(md_match.group(1))
         lines = [
             line
             for line in raw.strip().splitlines()
             if not line.strip().startswith("--") and line.strip()
         ]
-        return "\n".join(lines).strip()
+        text = "\n".join(lines).strip()
+        select_match = re.search(r"\bSELECT\b[\s\S]*", text, re.IGNORECASE)
+        if select_match:
+            text = select_match.group(0)
+        return HRAnalyst._clean_sql(text)
+
+    @staticmethod
+    def _clean_label(label: Any) -> str:
+        text = re.sub(r"\s+", " ", str(label or "")).strip()
+        if not text:
+            return "查询结果"
+        return text[:_MAX_LABEL_CHARS]
+
+    @staticmethod
+    def _clean_sql(sql: str) -> str:
+        text = sql.strip()
+        fence_match = re.search(
+            r"```(?:sql)?\s*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE
+        )
+        if fence_match:
+            text = fence_match.group(1).strip()
+        text = re.sub(r"^\s*SQL\s*[:：]\s*", "", text, flags=re.IGNORECASE)
+        text = text.strip().rstrip(";")
+        if ";" in text:
+            text = text.split(";", 1)[0].strip()
+        return text
+
+    @staticmethod
+    def _fallback_queries(question: str) -> list[dict]:
+        q = question or ""
+        if any(word in q for word in ("招聘", "候选", "offer", "Offer")):
+            return [
+                {
+                    "label": "招聘漏斗概览",
+                    "sql": (
+                        'SELECT "hr_screening" AS "HR筛选", "interview1" AS "一面", '
+                        '"interview2" AS "二面", "interview_final" AS "终面", '
+                        '"offering" AS "Offer", COUNT(*) AS "人数" '
+                        'FROM "recruitment_pipeline" '
+                        'GROUP BY "hr_screening", "interview1", "interview2", "interview_final", "offering" '
+                        'ORDER BY "人数" DESC LIMIT 50'
+                    ),
+                }
+            ]
+
+        if any(word in q for word in ("考勤", "工时", "出勤")):
+            return [
+                {
+                    "label": "部门考勤概览",
+                    "sql": (
+                        'SELECT d."name" AS "部门", ROUND(AVG(a."avg_daily_hours"), 2) AS "平均日工时", '
+                        'ROUND(AVG(a."work_days"), 1) AS "平均出勤天数", COUNT(DISTINCT e."id") AS "员工数" '
+                        'FROM "attendance_records" a '
+                        'JOIN "employees" e ON a."employee_id" = e."id" '
+                        'LEFT JOIN "departments" d ON e."department_id" = d."id" '
+                        'GROUP BY d."id", d."name" ORDER BY "平均日工时" DESC LIMIT 50'
+                    ),
+                }
+            ]
+
+        if any(word in q for word in ("绩效", "评级", "等级")):
+            return [
+                {
+                    "label": "绩效等级分布",
+                    "sql": (
+                        'SELECT "final_grade" AS "绩效等级", COUNT(*) AS "人数" '
+                        'FROM "performance_reviews" WHERE "status" = \'finalized\' '
+                        'GROUP BY "final_grade" ORDER BY "绩效等级" LIMIT 50'
+                    ),
+                }
+            ]
+
+        if any(word in q for word in ("人才", "潜力", "九宫格", "继任")):
+            return [
+                {
+                    "label": "人才矩阵分布",
+                    "sql": (
+                        'SELECT "performance" AS "绩效", "potential" AS "潜力", COUNT(*) AS "人数" '
+                        'FROM "talent_matrix" GROUP BY "performance", "potential" '
+                        'ORDER BY "绩效", "潜力" LIMIT 50'
+                    ),
+                }
+            ]
+
+        return [
+            {
+                "label": "员工状态分布",
+                "sql": (
+                    'SELECT "status" AS "员工状态", COUNT(*) AS "人数" '
+                    'FROM "employees" GROUP BY "status" ORDER BY "人数" DESC LIMIT 50'
+                ),
+            },
+            {
+                "label": "部门人数分布",
+                "sql": (
+                    'SELECT d."name" AS "部门", COUNT(e."id") AS "人数" '
+                    'FROM "departments" d LEFT JOIN "employees" e ON e."department_id" = d."id" '
+                    'GROUP BY d."id", d."name" ORDER BY "人数" DESC LIMIT 50'
+                ),
+            },
+        ]

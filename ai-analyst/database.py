@@ -15,7 +15,16 @@ logger = logging.getLogger("ai-analyst.database")
 
 # ── 危险关键字黑名单 ──────────────────────────────────
 _FORBIDDEN_KEYWORDS = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|RENAME|GRANT|REVOKE|CALL|EXEC|EXECUTE)\b",
+    r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|RENAME|GRANT|REVOKE|CALL|EXEC|EXECUTE|ATTACH|DETACH|VACUUM|PRAGMA|ANALYZE|REINDEX|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b",
+    re.IGNORECASE,
+)
+
+_LIMIT_TAIL_RE = re.compile(
+    r"\bLIMIT\s+(\d+)(\s+OFFSET\s+\d+)?\s*$",
+    re.IGNORECASE,
+)
+_LIMIT_OFFSET_COUNT_TAIL_RE = re.compile(
+    r"\bLIMIT\s+(\d+)\s*,\s*(\d+)\s*$",
     re.IGNORECASE,
 )
 
@@ -187,13 +196,28 @@ class HRDatabase:
         if not cleaned.upper().startswith("SELECT"):
             raise PermissionError("安全拦截：仅允许 SELECT 查询，已阻止非法操作。")
 
+        if ";" in cleaned:
+            raise PermissionError("安全拦截：检测到多语句分隔符，已阻止执行。")
+
         if _FORBIDDEN_KEYWORDS.search(cleaned):
             match = _FORBIDDEN_KEYWORDS.search(cleaned)
             raise PermissionError(
                 f"安全拦截：检测到禁止关键字 「{match.group()}」，已阻止执行。"
             )
 
-        if not re.search(r"\bLIMIT\s+\d+", cleaned, re.IGNORECASE):
+        limit_match = _LIMIT_TAIL_RE.search(cleaned)
+        offset_count_match = _LIMIT_OFFSET_COUNT_TAIL_RE.search(cleaned)
+        if limit_match:
+            limit = min(int(limit_match.group(1)), _MAX_ROWS)
+            suffix = limit_match.group(2) or ""
+            cleaned = _LIMIT_TAIL_RE.sub(f"LIMIT {limit}{suffix}", cleaned)
+        elif offset_count_match:
+            offset = int(offset_count_match.group(1))
+            count = min(int(offset_count_match.group(2)), _MAX_ROWS)
+            cleaned = _LIMIT_OFFSET_COUNT_TAIL_RE.sub(
+                f"LIMIT {offset}, {count}", cleaned
+            )
+        else:
             cleaned += f" LIMIT {_MAX_ROWS}"
 
         return cleaned + ";"
@@ -204,6 +228,8 @@ class HRDatabase:
         logger.info("执行 SQL：%s", safe_sql[:200])
 
         with self._engine.connect() as conn:
+            if conn.dialect.name == "sqlite":
+                conn.exec_driver_sql("PRAGMA query_only = ON")
             result = conn.execute(text(safe_sql))
             columns: list[str] = list(result.keys())
             rows: list[dict] = [dict(zip(columns, row)) for row in result.fetchall()]

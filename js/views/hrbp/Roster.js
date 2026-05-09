@@ -1402,7 +1402,7 @@ function perfStatusEn(s) {
           homeLineId: window.TM.useProductLineStore().currentLineId,
           rmStatus: 'pending_approval',
           rmNominationSource: '花名册导入识别',
-          managerPermissions: { modules: window.TM.MGR_MODULES.slice(), ops: window.TM.RM_ALL_OPS_ON() },
+          managerPermissions: { modules: (window.TM.MGR_DEFAULT_MODULES || window.TM.MGR_MODULES).slice(), ops: window.TM.RM_ALL_OPS_ON() },
         });
         count++;
       });

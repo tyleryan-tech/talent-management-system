@@ -65,6 +65,7 @@
   <script src="../js/stores/authStore.js"></script>
   <script src="../js/stores/hrScopeStore.js"></script>
   <script src="../js/stores/productLineStore.js"></script>
+  <script src="../js/views/hrbp/AiAnalyst.js"></script>
 
   <!-- Test framework -->
   <script src="test-runner.js"></script>
@@ -82,6 +83,7 @@
 
   <!-- New: View computed layer -->
   <script src="test-view-computed.js"></script>
+  <script src="test-ai-analyst.js"></script>
 
   <!-- New: Smoke end-to-end -->
   <script src="test-smoke.js"></script>
@@ -137,6 +139,9 @@
       };
 
       const results = await TM._testRunner.runAll({ log });
+      window.TM._lastTestResults = results;
+      window.TM._lastTestRunAt = new Date().toISOString();
+      window.dispatchEvent(new CustomEvent('tm-tests-complete', { detail: results }));
 
       if (results.failed > 0) {
         statusBar.className = 'fail';
@@ -150,9 +155,13 @@
 
       return results;
     }
+    window.runTests = runTests;
 
     // Auto-run on page load
     window.addEventListener('load', function () {
+      if (new URLSearchParams(window.location.search).get('autorun') === '0') {
+        document.getElementById('autorun').checked = false;
+      }
       if (document.getElementById('autorun').checked) {
         setTimeout(runTests, 300);
       }

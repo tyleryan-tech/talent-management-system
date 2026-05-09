@@ -20,6 +20,8 @@
 
   const MGR_MODULES = ['dashboard', 'roster', 'org', 'recruitment', 'talent', 'performance', 'attendance', 'ai_analyst'];
   window.TM.MGR_MODULES = MGR_MODULES;
+  const MGR_DEFAULT_MODULES = MGR_MODULES.filter(function (m) { return m !== 'ai_analyst'; });
+  window.TM.MGR_DEFAULT_MODULES = MGR_DEFAULT_MODULES;
 
   /**
    * Every RM operation that can be toggled by a super_admin.
@@ -154,7 +156,7 @@
             return moduleKey === 'dashboard' || moduleKey === 'performance';
           }
           const perms = this.currentUser?.managerPermissions;
-          if (!perms || !perms.modules) return true;
+          if (!perms || !perms.modules) return MGR_DEFAULT_MODULES.includes(moduleKey);
           return perms.modules.includes(moduleKey);
         }
         return true;
@@ -203,7 +205,7 @@
         }
         data.users = [
           { id: 1, username: 'hrbp', email: 'hrbp@company.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'HRBP Super Admin', employeeId: null },
-          { id: 2, username: 'manager', email: 'manager@company.com', password: '123', role: 'manager', realName: 'Reporting Manager', employeeId: null, rmStatus: 'active', managerPermissions: { modules: MGR_MODULES.slice(), ops: allOpsOn() } },
+          { id: 2, username: 'manager', email: 'manager@company.com', password: '123', role: 'manager', realName: 'Reporting Manager', employeeId: null, rmStatus: 'active', managerPermissions: { modules: MGR_DEFAULT_MODULES.slice(), ops: allOpsOn() }, aiAnalystPermissionMigrated: true },
           { id: 3, username: 'superadmin', email: 'superadmin@company.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'Super Admin', employeeId: null },
           { id: 4, username: 'intern', email: 'intern@company.com', password: '123', role: 'hrbp', hrbpSubType: 'intern', allowedModules: ['recruitment'], realName: 'Intern Demo', employeeId: null },
           { id: 5, username: 'tyler.yan', email: 'tyler.yan@shopee.com', password: '123', role: 'hrbp', superAdmin: true, hrbpSubType: 'super_admin', realName: 'Tyler Yan', employeeId: null },
@@ -231,7 +233,22 @@
             dirty = true;
           }
           if (u.role === 'manager' && !u.managerPermissions) {
-            u.managerPermissions = { modules: MGR_MODULES.slice(), ops: allOpsOn() };
+            u.managerPermissions = { modules: MGR_DEFAULT_MODULES.slice(), ops: allOpsOn() };
+            dirty = true;
+          }
+          if (u.role === 'manager' && u.managerPermissions && u.aiAnalystPermissionMigrated !== true) {
+            var plHeadId = data.orgSettings?.productLineHeadEmployeeId;
+            var isPlHead = u.employeeId != null && plHeadId != null && Number(u.employeeId) === Number(plHeadId);
+            var modules = Array.isArray(u.managerPermissions.modules) ? u.managerPermissions.modules : MGR_MODULES.slice();
+            if (!isPlHead) {
+              var aiIdx = modules.indexOf('ai_analyst');
+              if (aiIdx >= 0) {
+                modules.splice(aiIdx, 1);
+                u.managerPermissions = { ...u.managerPermissions, modules };
+                dirty = true;
+              }
+            }
+            u.aiAnalystPermissionMigrated = true;
             dirty = true;
           }
           if (u.homeLineId == null && u.employeeId != null && plStore) {

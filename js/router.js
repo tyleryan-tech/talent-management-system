@@ -12,7 +12,7 @@
       component: TM.LayoutView,
       meta: { zone: 'hrbp' },
       children: [
-        { path: '', redirect: '/hrbp/ai-analyst' },
+        { path: '', redirect: '/hrbp/dashboard' },
         { path: 'dashboard', name: 'hrbp-dashboard', component: TM.HrbpDashboard, meta: { title: 'Dashboard' } },
         { path: 'roster', name: 'hrbp-roster', component: TM.HrbpRoster, meta: { title: 'Employee roster' } },
         { path: 'org', name: 'hrbp-org', component: TM.HrbpOrg, meta: { title: 'Organization' } },
@@ -30,8 +30,8 @@
       component: TM.LayoutView,
       meta: { zone: 'manager' },
       children: [
-        { path: '', redirect: '/manager/ai-analyst' },
-        { path: 'dashboard', name: 'mgr-dashboard', component: TM.HrbpDashboard, meta: { title: 'Dashboard' } },
+        { path: '', redirect: '/manager/dashboard' },
+        { path: 'dashboard', name: 'mgr-dashboard', component: TM.MgrDashboard, meta: { title: 'Dashboard' } },
         { path: 'roster', name: 'mgr-roster', component: TM.HrbpRoster, meta: { title: '花名册' } },
         { path: 'org', name: 'mgr-org', component: TM.HrbpOrg, meta: { title: '组织管理' } },
         { path: 'recruitment', name: 'mgr-recruitment', component: TM.HrbpRecruitment, meta: { title: '招聘管理' } },
@@ -70,10 +70,12 @@
       if (auth.isLoggedIn && to.name === 'login') {
         if (auth.isHrbp) {
           const HRBP_MODS = window.TM.HRBP_MODULES || [];
-          const firstMod = HRBP_MODS.find((m) => auth.canAccessModule(m)) || 'ai_analyst';
+          const firstMod = HRBP_MODS.find((m) => auth.canAccessModule(m)) || 'dashboard';
           next('/hrbp/' + firstMod.replace(/_/g, '-'));
         } else {
-          next('/manager/ai-analyst');
+          const MGR_MODS = window.TM.MGR_MODULES || [];
+          const firstMod = MGR_MODS.find((m) => auth.canAccessModule(m)) || 'dashboard';
+          next('/manager/' + firstMod.replace(/_/g, '-'));
         }
       } else next();
       return;
@@ -84,15 +86,15 @@
     }
     const canHrbp = auth.isHrbp || auth.isSuperAdmin || auth.isProductLineHead;
     if (to.path.startsWith('/hrbp') && !canHrbp) {
-      next('/manager/ai-analyst');
+      next('/manager/dashboard');
       return;
     }
     if (to.path.startsWith('/manager') && !auth.isManager) {
-      next('/hrbp/ai-analyst');
+      next('/hrbp/dashboard');
       return;
     }
     if (to.path.startsWith('/admin') && !auth.canManageUsers) {
-      next(auth.isHrbp ? '/hrbp/ai-analyst' : '/manager/ai-analyst');
+      next(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
       return;
     }
     if (to.meta.requireSuperAdmin && !auth.canManageUsers) {

@@ -7,6 +7,7 @@
 - **SQLite** 持久化：产品线列表 + 每条产品线一份完整工作区 JSON（与前端 `exportSnapshot` 结构一致，并附加 `hrScopeRootDepartmentId`）。
 - **JWT** 登录：账号与密码哈希存在服务端 `login_users` 表（与演示数据一致：`hrbp@company.com` / `manager@company.com` / `superadmin@company.com`，密码均为 `123`）。
 - **PUT /api/workspace/:lineId**：请求体携带 `clientVersion`，与服务器版本一致才写入；成功后版本号 +1，并通过 WebSocket 向订阅该产品线的客户端广播 `workspace_updated`。
+- **AI 数据分析**：`/api/ai-analyst/*` 已合入主后端，复用登录态、产品线和服务端读裁剪；未配置模型密钥时返回内置分析摘要。
 - 前端在启用同步后，会在本地 **继续写入 localStorage 作为缓存**，并以防抖方式向服务器推送变更。
 
 ## 运行要求
@@ -75,6 +76,8 @@ npm start
 | GET | /api/workspace/:lineId | 获取快照、`version`、`scope` |
 | POST | /api/workspace/:lineId/patch | 增量合并（所有已登录角色；经理受限） |
 | PUT | /api/workspace/:lineId | 整表保存（仅 HRBP / 超级管理员） |
+| GET | /api/ai-analyst/context | 获取当前 AI 分析上下文和数据概览 |
+| POST | /api/ai-analyst/chat | 基于当前权限范围生成 AI/内置分析 |
 | WS | /ws?token=JWT | 连接后发送 `{ type:'subscribe', lineId }` |
 
 健康检查：`GET /health`

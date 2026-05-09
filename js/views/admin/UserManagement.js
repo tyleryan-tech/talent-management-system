@@ -15,6 +15,7 @@
   const MODULE_LABELS = {
     dashboard: 'Dashboard', roster: '花名册', org: '组织管理',
     recruitment: '招聘管理', talent: '人才盘点', performance: '绩效', attendance: '考勤',
+    ai_analyst: 'AI 数据分析',
   };
   const RM_STATUS_LABELS = { pending_approval: '待审批', active: '已激活', revoked: '已撤销' };
   const RM_STATUS_CLASS = { pending_approval: 'tag-warn', active: 'tag-ok', revoked: 'tag-err' };
@@ -396,6 +397,7 @@
 
       const allHrbpModules = window.TM.HRBP_MODULES;
       const allMgrModules = window.TM.MGR_MODULES;
+      const defaultMgrModules = window.TM.MGR_DEFAULT_MODULES || allMgrModules.filter(function (m) { return m !== 'ai_analyst'; });
       const permDefs = window.TM.RM_PERM_DEFS;
       const productLineStore = window.TM.useProductLineStore();
 
@@ -559,7 +561,7 @@
       function mgrHasModule(u, m) {
         if (m === 'dashboard') return true;
         var perms = u.managerPermissions;
-        if (!perms || !perms.modules) return true;
+        if (!perms || !perms.modules) return defaultMgrModules.includes(m);
         return perms.modules.includes(m);
       }
       function moduleLabel(m) { return MODULE_LABELS[m] || m; }
@@ -683,7 +685,7 @@
           }
         } else if (u.role === 'manager') {
           if (m === 'dashboard') return;
-          var perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+          var perms = u.managerPermissions || { modules: defaultMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
           var mi2 = perms.modules.indexOf(m);
           if (mi2 >= 0) {
             perms.modules.splice(mi2, 1);
@@ -718,7 +720,7 @@
             data._markDirty('users'); data.persistAll();
           }
         } else if (u.role === 'manager') {
-          var perms = u.managerPermissions || { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+          var perms = u.managerPermissions || { modules: defaultMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
           perms.ops[key] = perms.ops[key] === false ? true : false;
           u.managerPermissions = perms;
           if (u.id === auth.currentUser?.id) {
@@ -794,7 +796,7 @@
             }
           } else {
             newUser.rmStatus = 'pending_approval';
-            newUser.managerPermissions = { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+            newUser.managerPermissions = { modules: defaultMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
             newUser.rmNominationSource = '手动创建';
           }
           data.users.push(newUser);
@@ -821,7 +823,7 @@
             user.hrbpSubType = undefined; user.superAdmin = undefined; user.allowedModules = undefined;
             user.allowedLineIds = undefined;
             if (!user.managerPermissions) {
-              user.managerPermissions = { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
+              user.managerPermissions = { modules: defaultMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() };
             }
             if (!user.rmStatus) user.rmStatus = 'pending_approval';
           }
@@ -844,7 +846,7 @@
       function openPermEdit(u) {
         permTarget.value = u;
         var perms = u.managerPermissions || {};
-        permForm.modules = [...(perms.modules || allMgrModules.slice())];
+        permForm.modules = [...(perms.modules || defaultMgrModules.slice())];
         var ops = perms.ops || window.TM.RM_ALL_OPS_ON();
         permForm.ops = {};
         permDefs.forEach(function (d) { permForm.ops[d.key] = ops[d.key] !== false; });
@@ -895,7 +897,7 @@
         permTarget.value = u;
         _approvalPending.value = u.id;
         var perms = u.managerPermissions || {};
-        permForm.modules = [...(perms.modules || allMgrModules.slice())];
+        permForm.modules = [...(perms.modules || defaultMgrModules.slice())];
         var ops = perms.ops || window.TM.RM_ALL_OPS_ON();
         permForm.ops = {};
         permDefs.forEach(function (d) { permForm.ops[d.key] = ops[d.key] !== false; });
@@ -935,7 +937,7 @@
           homeLineId: lineId,
           rmStatus: 'pending_approval',
           rmNominationSource: '系统提名',
-          managerPermissions: { modules: allMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() },
+          managerPermissions: { modules: defaultMgrModules.slice(), ops: window.TM.RM_ALL_OPS_ON() },
         });
         data._markDirty('users'); data.persistAll();
         nomEmpId.value = null; nomPassword.value = '';

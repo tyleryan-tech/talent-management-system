@@ -134,7 +134,7 @@
       const safeRedirect = typeof redir === 'string'
         && /^\/(?:hrbp|manager|profile)(?:\/|$)/.test(redir);
       if (safeRedirect) router.push(redir);
-      else router.push(auth.isHrbp ? '/hrbp/ai-analyst' : '/manager/ai-analyst');
+      else router.push(auth.isHrbp ? '/hrbp/dashboard' : '/manager/dashboard');
     }
 
     return { username, password, rolePick, error, pickRole, onSubmit, serverMode };

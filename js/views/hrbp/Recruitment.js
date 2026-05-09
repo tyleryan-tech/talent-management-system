@@ -787,6 +787,12 @@
       const auth = window.TM.useAuthStore();
       const _zs = window.TM.useZoneScope(data);
       const tab = ref('overview');
+      const _teamDeptNames = computed(() => {
+        if (!_zs.isManagerZone.value) return null;
+        const names = new Set();
+        _zs.scopedDepartments.value.forEach((d) => names.add(d.name));
+        return names;
+      });
 
       function priorityLabel(p) { return PRIORITY_EN[p] || p || '—'; }
       function recruitTypeLabel(v) { return RECRUIT_TYPE_LABELS[v] || '-'; }
@@ -794,7 +800,6 @@
       /* ── Overview ── */
       const overviewData = computed(() => {
         if (!_zs.isManagerZone.value) return buildOverviewAuto(data);
-        const proxy = Object.create(data);
         const deptNames = _teamDeptNames.value;
         const origTags = data.positionRecruitTags || {};
         const filteredTags = {};
@@ -807,21 +812,20 @@
             if (d && deptNames.has(d.name)) filteredTags[key] = origTags[key];
           });
         }
-        proxy.positionRecruitTags = filteredTags;
         const deptNameSet = deptNames || new Set();
-        proxy.recruitmentPipeline = (data.recruitmentPipeline || []).filter((r) => deptNameSet.has(String(r.team || '').trim()));
-        return buildOverviewAuto(proxy);
+        const scopedPipeline = (data.recruitmentPipeline || []).filter((r) => deptNameSet.has(String(r.team || '').trim()));
+        return buildOverviewAuto({
+          positionRecruitTags: filteredTags,
+          recruitmentPipeline: scopedPipeline,
+          _posMap: data._posMap,
+          _deptMap: data._deptMap,
+          getPositionRecruitPriority: data.getPositionRecruitPriority.bind(data),
+        });
       });
 
       /* ── Pipeline ── */
       const pipeCols = PIPE_COLS;
       const pipeGroups = PIPE_GROUPS;
-      const _teamDeptNames = computed(() => {
-        if (!_zs.isManagerZone.value) return null;
-        const names = new Set();
-        _zs.scopedDepartments.value.forEach((d) => names.add(d.name));
-        return names;
-      });
       const pipeAllRows = computed(() => {
         const all = data.recruitmentPipeline || [];
         if (!_teamDeptNames.value) return all;

@@ -1,4 +1,5 @@
 node_modules/
+dist/
 server/data/
 server/node_modules/
 .env
@@ -8,3 +9,4 @@ Thumbs.db
 __pycache__/
 ai-analyst/analyst.log
 ai-analyst/chat_history.json
+test-reports/

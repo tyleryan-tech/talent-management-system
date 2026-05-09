@@ -103,8 +103,14 @@
           const t = String(c).trim();
           if (t && t !== '__OFF__') {
             if (t === '__SAME_ORIGIN__') {
-              apiBase = w.location.origin.replace(/\/$/, '');
-              apiBaseSource = 'meta';
+              if (w.location.protocol === 'http:' || w.location.protocol === 'https:') {
+                apiBase = w.location.origin.replace(/\/$/, '');
+                apiBaseSource = 'meta';
+                applyWsMeta();
+                return;
+              }
+              apiBase = '';
+              apiBaseSource = 'none';
               applyWsMeta();
               return;
             }

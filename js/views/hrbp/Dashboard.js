@@ -171,6 +171,7 @@
     let echartsLib = null;
     let cDept = null;
     let cStatus = null;
+    let disposed = false;
 
     const showPanel = ref(false);
     const showAddChart = ref(false);
@@ -237,8 +238,10 @@
     }
 
     async function renderDept() {
-      if (!chartDept.value) return;
+      const el = chartDept.value;
+      if (disposed || !el) return;
       if (!echartsLib) echartsLib = await loadEcharts();
+      if (disposed || chartDept.value !== el || !el.isConnected) return;
       const byDept = {};
       depts.value.forEach((d) => { byDept[d.id] = 0; });
       emps.value.forEach((e) => {
@@ -248,7 +251,7 @@
       const deptNames = scopeDepts.map((d) => d.name);
       const deptVals = scopeDepts.map((d) => byDept[d.id] || 0);
       if (cDept) cDept.dispose();
-      cDept = echartsLib.init(chartDept.value);
+      cDept = echartsLib.init(el);
       cDept.setOption({
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: deptNames, axisLabel: { color: '#64748b' } },
@@ -258,12 +261,14 @@
     }
 
     async function renderStatus() {
-      if (!chartStatus.value) return;
+      const el = chartStatus.value;
+      if (disposed || !el) return;
       if (!echartsLib) echartsLib = await loadEcharts();
+      if (disposed || chartStatus.value !== el || !el.isConnected) return;
       const st = { active: 0, probation: 0, leave: 0 };
       emps.value.forEach((e) => { st[e.status] = (st[e.status] || 0) + 1; });
       if (cStatus) cStatus.dispose();
-      cStatus = echartsLib.init(chartStatus.value);
+      cStatus = echartsLib.init(el);
       cStatus.setOption({
         tooltip: {
           trigger: 'item',
@@ -293,6 +298,7 @@
     }
 
     onMounted(() => {
+      disposed = false;
       window.addEventListener('resize', handleResize);
       nextTick(() => {
         renderDept();
@@ -301,6 +307,7 @@
     });
 
     onUnmounted(() => {
+      disposed = true;
       window.removeEventListener('resize', handleResize);
       if (cDept) { cDept.dispose(); cDept = null; }
       if (cStatus) { cStatus.dispose(); cStatus = null; }

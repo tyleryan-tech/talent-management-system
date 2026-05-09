@@ -66,9 +66,6 @@ func TestHasFullWorkspaceAccess(t *testing.T) {
 }
 
 func TestVerifyPassword(t *testing.T) {
-	// bcrypt hash of "123"
-	hash := "$2a$10$LbEh9DeX0bG/iQ7dY0JYf.cM3WqHK9YAY/7QC8k4/w6N5PF4gW5j2"
-	// Note: this test won't work with hardcoded hash since we'd need to generate one.
 	// Just test that wrong password returns false
 	if VerifyPassword("invalid-hash", "123") {
 		t.Error("Invalid hash should return false")
